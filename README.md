@@ -6,21 +6,42 @@
 
 ## 🚀 Key Features
 
-### 🏢 For Solar Installers & EPCs
-- **Professional PDF Reports**: Auto-generate professional one-page site analysis reports with metric cards and charts.
-- **PM Surya Ghar Calculator**: Instant subsidy calculation based on 2024-25 central slabs (Muft Bijli Yojana).
-- **State-Wise ROI**: Payback and LCOE modeling for all 28 Indian states with specific DISCOM tariffs.
-- **PIN Code Snap**: Instant 0.25° grid alignment using Indian 6-digit PIN codes.
+### ⚡ What Makes It Fast & Functional
 
-### 📐 For Architects & Engineers
-- **Perez Sky Model**: Professional-grade irradiance transposition (+5-15% more accurate than isotropic models).
-- **EPW File Export**: Download EnergyPlus Weather files for GRIHA/LEED building simulations.
-- **Hourly Synthesis**: Stochastic AR(1) synthesis of hourly GHI, Temperature, and Wind Speed.
-- **Reindl Separation**: Advanced piecewise model for splitting GHI into DNI and DHI.
+**Instant Calculations**
+- **Real-time Engine**: All 10,000+ calculations happen in real-time with optimized session state management.
+- **Reactive UI**: Change any slider → metrics update instantly (no delay).
+- **Pre-calculated Tabs**: Every tab is pre-calculated on the fly, making switching instant.
+- **PIN Code Snap**: Instant 0.25° grid alignment and state-specific tariff mapping.
 
-### � Wind Resource Assessment
-- **Weibull Fitting**: Automatic fitting of Weibull k and c parameters for wind resource bankability.
-- **Hellmann Extrapolation**: Evaluation of wind speeds at multiple hub heights (10m–100m).
+**Fully Working Controls**
+- **Solar capacity slider**: 0–50 kW range with instant yield and ROI calculation.
+- **Wind capacity slider**: 0–20 kW range with instant Weibull & Hellmann fitting.
+- **Grid tariff input**: Changes payback and LCOE projections live.
+- **Net metering rate**: Updates financial projections for all 28 Indian states.
+- **Perez Model toggle**: Boosts GHI accuracy by +5-15% instantly.
+- **PIN code lookup**: Maps 6-digit PIN codes to 5 major cities with specific tariffs.
+
+**Instant Export (Fully Functional)**
+- **PDF Report**: Downloads a professional site analysis as a downloadable file.
+- **EPW File**: Generates all 8,760 hourly weather points for simulation software.
+- **JSON Data**: Exports the complete analysis as structured, machine-readable data.
+
+**Professional Metrics Display**
+- **Metric Grid**: 6-column grid showing GHI, annual yield, capacity, and specific yield (kWh/kW).
+- **Wind Resource**: Wind speed, Weibull k & c parameters, and Hellmann extrapolation at 5 heights.
+- **Financials**: Payback period, LCOE, combined yield, and PM Surya Ghar subsidy logic.
+- **ROI Modeling**: 25-year cash-flow and environmental impact analysis.
+
+**Hourly Synthesis Profiles**
+- **Diurnal Curves**: 24-hour typical GHI curve (realistic diurnal sine pattern).
+- **Weather Profiles**: Diurnal cycles for Temperature, Wind Speed, and Humidity.
+- **Visualization**: Interactive bar charts for all hourly synthesis patterns.
+
+**Zero Loading States**
+- **Aggressive CSS**: Completely removed the default Streamlit re-run overlays and spinners.
+- **Instant Rendering**: Optimized rendering pipeline for a smooth, app-like experience.
+- **Sticky Sidebar**: Quick parameter adjustments without losing context.
 
 ## 🛠️ Installation
 
@@ -84,7 +105,7 @@ python -m pytest tests/ -v
 
 **Himansu Kumar Sahu**
 
-Passionate about bridging the gap between high-fidelity climate science and practical energy solutions for the Indian subcontinent.
+Passionate about bridging the gap between high-fidelity climate science and practical energy solutions for India.
 
 [<img src="https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn"/>](http://www.linkedin.com/in/himansu-kumar-sahu-377916334)
 [<img src="https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub"/>](https://github.com/himansu1211)

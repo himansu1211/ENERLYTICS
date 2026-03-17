@@ -83,8 +83,8 @@ def enrich_cell_with_climatology(cell: Dict[str, Any], clim: Dict[str, np.ndarra
     return out
 
 def process_cells(cells: Iterable[Dict[str, Any]], output_dir: str, tau: float = 0.75) -> list[str]:
-    from .core import generate_cell
-    from .storage import write_parquet_row
+    from energy_explore.core import generate_cell
+    from energy_explore.storage import write_parquet_row
     from tqdm import tqdm
     
     os.makedirs(output_dir, exist_ok=True)

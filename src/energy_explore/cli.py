@@ -3,18 +3,26 @@ Command line interface for bulk generating ENERLYTICS data.
 """
 import argparse
 import os
+import sys
 import numpy as np
+
+# --- Fix for ModuleNotFoundError when run as script ---
+file_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(file_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
-from .pipeline import generate_grid, fetch_nasa_power_climatology, enrich_cell_with_climatology
-from .core import generate_cell
-from .storage import write_parquet_row
+from energy_explore.pipeline import generate_grid, fetch_nasa_power_climatology, enrich_cell_with_climatology
+from energy_explore.core import generate_cell
+from energy_explore.storage import write_parquet_row
 
 def process_single_cell(cell, output_dir, tau, resume):
     grid_id = cell["grid_id"]
     lat = cell["lat"]
     # Check resume
-    from .storage import lat_band_2deg
+    from energy_explore.storage import lat_band_2deg
     band = lat_band_2deg(lat)
     path = f"{output_dir}/lat_band={band}/cell_{grid_id}.parquet"
     if resume and os.path.exists(path):

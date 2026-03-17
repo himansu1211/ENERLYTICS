@@ -146,10 +146,6 @@ def calculate_roi(
     total_cost_discounted = net_capex + sum((annual_opex * (1+0.03)**t) / (1 + r)**t for t in range(1, lifetime_yr + 1))
     lcoe = total_cost_discounted / total_energy_discounted if total_energy_discounted > 0 else 0
     
-    # Environmental
-    co2_saved = (annual_energy_kwh * 0.82) / 1000.0 # Tonnes
-    trees = int(co2_saved / 0.022)
-    
     year_by_year = []
     cum_savings = 0
     for i in range(lifetime_yr):
@@ -166,13 +162,11 @@ def calculate_roi(
         "net_capex_inr": net_capex,
         "annual_self_consumed_kwh": annual_self_consumed,
         "annual_exported_kwh": annual_exported,
-        "annual_savings_inr_yr1": savings_yr1,
+        "annual_savings_inr": savings_yr1,
         "simple_payback_yr": simple_payback,
         "lcoe_inr_per_kwh": lcoe,
         "npv_25yr_inr": npv,
         "irr_pct": irr,
-        "co2_avoided_tonnes_yr": co2_saved,
-        "trees_equivalent": trees,
         "year_by_year": year_by_year
     }
 
@@ -245,9 +239,9 @@ TREE_CO2_ABSORPTION_KG_PER_YEAR = 22.0
 def co2_and_environment(annual_kwh: float) -> dict:
     co2_kg = annual_kwh * INDIA_GRID_EMISSION_FACTOR_KG_PER_KWH
     return {
-        "co2_avoided_kg": co2_kg,
-        "co2_avoided_tonnes": co2_kg / 1000.0,
+        "co2_avoided_kg_yr": co2_kg,
+        "co2_avoided_tonnes_yr": co2_kg / 1000.0,
         "trees_equivalent": int(co2_kg / TREE_CO2_ABSORPTION_KG_PER_YEAR),
-        "coal_saved_kg": annual_kwh * 0.4,
+        "coal_saved_kg_yr": annual_kwh * 0.4,
         "homes_powered": int(annual_kwh / 1200)
     }

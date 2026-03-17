@@ -1,691 +1,598 @@
-"""
-ENERLYTICS - Professional Solar & Wind Advisory for India.
-"""
 import streamlit as st
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
 import pgeocode
-import requests
-import os
+import json
 from datetime import datetime
 
-# Import project modules
-from energy_explore.pipeline import fetch_nasa_power_climatology
-from energy_explore.core import generate_cell, monthly_indices, compute_monthly_means, simulate_pv_power, simulate_wind_power
-from energy_explore.validation import validation_metrics
-from energy_explore.advisor import generate_installation_advisory, HELLMANN_EXPONENTS, VENDOR_PANELS
-from energy_explore.financial import (
-    pm_surya_ghar_subsidy, calculate_roi, simulate_battery_dispatch, 
-    co2_and_environment, get_state_tariff, DISCOM_TARIFFS
-)
-from energy_explore.sizer import (
-    size_solar_system, energy_audit, compute_load, compare_energy_sources,
-    DEFAULT_APPLIANCES, ADDON_APPLIANCES, REGION_SUN_HOURS
-)
-from energy_explore.report import generate_pdf_report, generate_epw_string
-from energy_explore.perez import perez_poa_total
+# --- 1. Page Config (MUST BE FIRST) ---
+st.set_page_config(page_title="ENERLYTICS", page_icon="☀️", layout="wide")
 
-# --- Page Config ---
-st.set_page_config(
-    page_title="ENERLYTICS",
-    page_icon="☀️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# --- Logo / Header ---
+# --- 2. Minimalist CSS (No Animations, High Speed) ---
 st.markdown("""
-    <div style="display: flex; align-items: center; justify-content: center; padding: 10px; margin-bottom: 20px; border-bottom: 2px solid #F59E0B;">
-        <h1 style="color: #0F172A; margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; letter-spacing: 2px;">
-            <span style="color: #F59E0B;">ENER</span>LYTICS
-        </h1>
-        <span style="font-size: 2rem; margin-left: 10px;">☀️</span>
-    </div>
+    <style>
+    * { transition: none !important; animation: none !important; }
+    [data-testid="stMetric"] {
+        background: #f8fafc;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    #MainMenu, footer, header {visibility: hidden;}
+    [data-testid="stStatusWidget"] {display: none;}
+    .stTabs [data-baseweb="tab-panel"] { padding-top: 1.5rem; }
+    [data-testid="stSidebarCollapseButton"] {
+        visibility: visible !important;
+        background-color: #F59E0B !important;
+        color: white !important;
+        border-radius: 50% !important;
+    }
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #1e293b;
+        margin-bottom: 1rem;
+    }
+    .sub-header {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #334155;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+    }
+    .info-card {
+        background: #f1f5f9;
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid #F59E0B;
+    }
+    </style>
 """, unsafe_allow_html=True)
 
-# --- State Initialisation ---
-if 'generated' not in st.session_state:
-    st.session_state.generated = False
-if 'lat' not in st.session_state:
-    st.session_state.lat = 28.61 # New Delhi
-if 'lon' not in st.session_state:
-    st.session_state.lon = 77.23
-if 'place_name' not in st.session_state:
-    st.session_state.place_name = "New Delhi"
-if 'state_name' not in st.session_state:
-    st.session_state.state_name = "Delhi"
-if 'elev' not in st.session_state:
-    st.session_state.elev = 216.0
+# --- 3. Path Setup (Fix for ModuleNotFoundError) ---
+import sys
+import os
+file_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(file_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
-# --- Sidebar ---
+# --- 4. Imports from Local Modules ---
+from energy_explore.pipeline import fetch_nasa_power_climatology
+from energy_explore.core import generate_cell, compute_monthly_means, simulate_pv_power, simulate_wind_power, monthly_indices
+from energy_explore.financial import pm_surya_ghar_subsidy, calculate_roi, get_state_tariff, DISCOM_TARIFFS, co2_and_environment
+from energy_explore.sizer import size_solar_system, energy_audit, DEFAULT_APPLIANCES, ADDON_APPLIANCES, REGION_SUN_HOURS, compare_energy_sources, VENDOR_PANELS
+from energy_explore.report import generate_pdf_report
+
+# --- 4. Caching for Rapid Response ---
+@st.cache_data(ttl=3600)
+def get_weather(lat, lon, elev):
+    clim = fetch_nasa_power_climatology(lat, lon)
+    row = {"grid_id": "m", "lat": lat, "lon": lon, "elevation": elev, **clim}
+    return generate_cell(row), clim
+
+@st.cache_data(ttl=3600)
+def get_detailed_roi(yield_kwh, kw, cost, tariff, net, subsidy, sc):
+    return calculate_roi(yield_kwh, kw, cost, tariff, net, subsidy, sc)
+
+# --- 5. Session State Initialization ---
+if 'results' not in st.session_state:
+    st.session_state.results = None
+if 'loc' not in st.session_state:
+    st.session_state.loc = {"lat": 28.61, "lon": 77.23, "name": "New Delhi", "state": "Delhi"}
+if 'pincode' not in st.session_state:
+    st.session_state.pincode = "110001"
+if 'appliances' not in st.session_state:
+    st.session_state.appliances = [dict(a) for a in DEFAULT_APPLIANCES]
+if 'custom_units' not in st.session_state:
+    st.session_state.custom_units = 300
+
+# --- 6. Sidebar ---
 with st.sidebar:
-    st.title("☀️ ENERLYTICS")
-    nav = st.radio("Navigation", ["Explorer", "System Sizer", "Financial Calculator", "Products", "About"])
+    st.markdown("<h1 style='color:#F59E0B; text-align:center;'>ENERLYTICS</h1>", unsafe_allow_html=True)
+    nav = st.radio("Navigation", ["Explorer", "Comparison", "System Sizer", "ROI Analysis", "About"], key="nav")
     
     st.divider()
-    st.header("📍 1. Location")
-    pincode = st.text_input("Enter 6-digit PIN Code", value="110001", max_chars=6)
+    pincode = st.text_input("📍 PIN Code (India)", value=st.session_state.pincode, max_chars=6)
     
-    if pincode and len(pincode) == 6:
+    if pincode and pincode != st.session_state.pincode and len(pincode) == 6:
         nomi = pgeocode.Nominatim('in')
-        res = nomi.query_postal_code(pincode)
-        if not pd.isna(res.latitude):
-            st.session_state.lat = round(res.latitude * 4) / 4
-            st.session_state.lon = round(res.longitude * 4) / 4
-            st.session_state.place_name = res.place_name
-            st.session_state.state_name = res.state_name
-            st.success(f"Found: {res.place_name}, {res.state_name}")
-        else:
-            st.error("Invalid PIN code.")
-            
-    st.markdown(f"**Grid point:** {st.session_state.lat}°N, {st.session_state.lon}°E")
-    st.session_state.elev = st.number_input("Elevation (m)", value=st.session_state.elev)
-    
-    st.divider()
-    st.header("⚡ 2. Energy System")
-    solar_kw = st.number_input("Solar Capacity (kW)", value=5.0, min_value=0.0, step=1.0)
-    wind_kw = st.number_input("Wind Capacity (kW)", value=0.0, min_value=0.0, step=1.0)
-    mod_len = st.number_input("Module length (m)", value=2.0, min_value=0.5, max_value=4.0)
-    use_perez = st.checkbox("Use Perez 1990 Model", value=True)
-    if use_perez:
-        st.info("Perez 1990 anisotropic sky model (+5-15% accuracy vs isotropic)")
-        
-    st.divider()
-    with st.expander("💰 3. Financial Inputs"):
-        state_info = get_state_tariff(st.session_state.state_name)
-        cost_kw = st.number_input("System cost (₹/kW)", value=55000)
-        tariff = st.number_input("Grid tariff (₹/kWh)", value=state_info["tariff"], step=0.1)
-        net_meter = st.number_input("Net metering rate (₹/kWh)", value=state_info["net_meter"], step=0.1)
-        self_con = st.slider("Self consumption (%)", 50, 100, 80)
-        apply_subsidy = st.checkbox("Apply PM Surya Ghar Subsidy", value=True)
-        is_special = st.checkbox("Is special category state", value=False)
-        battery_kwh = st.number_input("Battery storage (kWh)", value=0.0)
-        loan_frac = st.slider("Loan fraction (%)", 0, 100, 70)
-        loan_rate = st.number_input("Loan interest rate (%)", value=7.0)
-
-    if st.button("Generate Synthetic Year + Analyse", use_container_width=True, type="primary"):
-        st.session_state.generated = True
-
-# --- Main App Logic ---
-if nav == "Explorer":
-    if not st.session_state.generated:
-        st.title("ENERLYTICS")
-        st.info("👈 Enter a PIN code and click 'Generate' in the sidebar to begin.")
-    else:
-        # 1. Fetch Data
-        with st.spinner("Fetching NASA climatology..."):
-            clim = fetch_nasa_power_climatology(st.session_state.lat, st.session_state.lon)
-            
-        # 2. Synthesis
-        with st.spinner("Synthesising hourly weather series..."):
-            row = {
-                "grid_id": f"{st.session_state.lat:.2f}_{st.session_state.lon:.2f}",
-                "lat": st.session_state.lat, "lon": st.session_state.lon, 
-                "elevation": st.session_state.elev, **clim
+        geo = nomi.query_postal_code(pincode)
+        if not pd.isna(geo.latitude):
+            st.session_state.loc = {
+                "lat": round(geo.latitude*4)/4, 
+                "lon": round(geo.longitude*4)/4, 
+                "name": geo.place_name, 
+                "state": geo.state_name
             }
-            data = generate_cell(row)
-            
-            # Add power simulations
-            data['pv_power'] = simulate_pv_power(data['ghi'], data['temp'], capacity_kw=solar_kw)
-            data['wind_power'] = simulate_wind_power(data['wind'], capacity_kw=wind_kw)
-            
-            # Advisory
-            adv = generate_installation_advisory(data, st.session_state.lat, use_perez, mod_len)
-            
-            # Financials
-            subsidy_val = pm_surya_ghar_subsidy(solar_kw, is_special)["subsidy_inr"] if apply_subsidy else 0
-            roi = calculate_roi(
-                data['pv_power'].sum() / 1000.0, solar_kw, cost_kw, 
-                tariff, net_meter, subsidy_val, self_consumption_pct=self_con
-            )
-            
-            # Battery
-            bess = simulate_battery_dispatch(data['pv_power'], battery_kwh=battery_kwh)
-            
-            # Metrics
-            metrics = validation_metrics(data, clim)
+            st.session_state.pincode = pincode
+            st.session_state.results = None # Reset results on location change
 
-        # 3. Tabs
-        t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["📊 Annual Summary", "📅 Monthly Breakdown", "🔧 Installation Advisory", "💰 Financial Analysis", "✅ Data Quality", "📄 Export", "🆚 Comparison Mode", "🗺️ Location Intelligence"])
+    solar_kw = st.slider("☀️ Solar (kW)", 0.0, 50.0, 5.0, 0.5)
+    wind_kw = st.slider("💨 Wind (kW)", 0.0, 20.0, 0.0, 0.5)
+    
+    with st.expander("💰 Financial Overrides"):
+        state_info = get_state_tariff(st.session_state.loc["state"])
+        t_in = st.number_input("Grid Tariff (₹/kWh)", value=state_info["tariff"], step=0.1)
+        n_in = st.number_input("Net Meter (₹/kWh)", value=state_info["net_meter"], step=0.1)
+        c_in = st.number_input("Cost per kW (₹)", value=55000, step=1000)
+        sc_in = st.slider("Self Consumption (%)", 50, 100, 80)
+
+# --- 7. Data Pre-computation ---
+if st.session_state.results is None or solar_kw != st.session_state.get('last_solar') or wind_kw != st.session_state.get('last_wind'):
+    data, clim = get_weather(st.session_state.loc["lat"], st.session_state.loc["lon"], 200.0)
+    pv_power = simulate_pv_power(data['ghi'], data['temp'], solar_kw)
+    wind_power = simulate_wind_power(data['wind'], wind_kw)
+    
+    sub_info = pm_surya_ghar_subsidy(solar_kw)
+    roi = get_detailed_roi(pv_power.sum()/1000, solar_kw, c_in, t_in, n_in, sub_info["subsidy_inr"], sc_in)
+    env = co2_and_environment(pv_power.sum()/1000 * 1000) # Input in kWh
+    
+    st.session_state.results = {
+        "data": data,
+        "clim": clim,
+        "pv_power": pv_power,
+        "wind_power": wind_power,
+        "sub_info": sub_info,
+        "roi": roi,
+        "env": env
+    }
+    st.session_state.last_solar = solar_kw
+    st.session_state.last_wind = wind_kw
+
+res = st.session_state.results
+
+# --- 8. Main App ---
+if nav == "Explorer":
+    st.markdown(f"<div class='main-header'>📍 {st.session_state.loc['name']} Energy Potential</div>", unsafe_allow_html=True)
+    
+    # 8.1 Summary Metrics
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Solar Capacity", f"{solar_kw} kW")
+    m2.metric("Annual Solar Yield", f"{res['pv_power'].sum()/1000:.1f} MWh/y")
+    m3.metric("Specific Yield", f"{res['pv_power'].sum()/solar_kw:.0f} kWh/kWp" if solar_kw > 0 else "0")
+    m4.metric("Avg Daily Sun", f"{res['data']['ghi'].mean()*24/1000:.2f} kWh/m²")
+    
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("Net Metering Rate", f"₹{n_in}/kWh")
+    m6.metric("Payback Period", f"{res['roi']['simple_payback_yr']:.1f} Yrs")
+    m7.metric("CO₂ Avoided", f"{res['env']['co2_avoided_tonnes_yr']:.1f} t/yr")
+    m8.metric("Trees Equivalent", f"{res['env']['trees_equivalent']} trees")
+
+    # 8.2 Detailed Visuals
+    t_sum, t_mon, t_prof, t_adv, t_env = st.tabs(["📊 Overview", "📅 Monthly Breakdown", "📈 24h Profiles", "🛠️ Installation Advice", "🌳 Environmental"])
+    
+    with t_sum:
+        st.markdown("<div class='sub-header'>Solar Irradiance Heatmap</div>", unsafe_allow_html=True)
+        fig_h = px.imshow(res['data']['ghi'].reshape(365, 24).T, color_continuous_scale="YlOrRd", labels=dict(x="Day of Year", y="Hour of Day", color="W/m²"))
+        fig_h.update_layout(height=450, margin=dict(l=0,r=0,t=20,b=0))
+        st.plotly_chart(fig_h, use_container_width=True, config={'displayModeBar': False})
         
-        with t1:
-            st.success(f"📍 **{st.session_state.place_name}** ({st.session_state.lat}°N, {st.session_state.lon}°E) | Elevation: {st.session_state.elev}m")
-            if not clim["nasa_data_used"]:
-                st.warning("⚠️ Using Regional Fallback Data (NASA API unavailable)")
-            
-            # Metric Cards
-            m1, m2, m3, m4, m5, m6 = st.columns(6)
-            insolation = data['ghi'].mean() * 24 / 1000.0
-            m1.metric("Insolation", f"{insolation:.2f}", "kWh/m²/d")
-            m2.metric("Avg Temp", f"{data['temp'].mean():.1f}°C")
-            m3.metric("Peak UV", "High")
-            m4.metric("Avg Wind", f"{data['wind'].mean():.1f}", "m/s")
-            m5.metric("Solar Yield", f"{data['pv_power'].sum()/1000:.1f}", "MWh/yr")
-            m6.metric("Wind Yield", f"{data['wind_power'].sum()/1000:.1f}", "MWh/yr")
-            
-            # Heatmap
-            st.subheader("☀️ Full-Year GHI Heatmap")
-            ghi_heat = data['ghi'].reshape(365, 24).T
-            fig_h = px.imshow(ghi_heat, color_continuous_scale="YlOrRd", labels=dict(x="Day", y="Hour", color="W/m²"))
-            fig_h.update_layout(template="simple_white", height=400)
-            st.plotly_chart(fig_h, use_container_width=True)
-            
-            # Hourly Profile
-            st.subheader("📈 Sample Week Profile (Jan 1-7)")
-            fig_p = go.Figure()
-            fig_p.add_trace(go.Scatter(y=data['pv_power'][:168], name="Solar Power (kW)", line=dict(color="#F59E0B")))
-            fig_p.add_trace(go.Scatter(y=data['wind_power'][:168], name="Wind Power (kW)", line=dict(color="#3B82F6")))
-            fig_p.add_trace(go.Scatter(y=data['temp'][:168], name="Temp (°C)", line=dict(color="#EF4444", dash="dash"), yaxis="y2"))
-            fig_p.update_layout(
-                yaxis2=dict(overlaying="y", side="right", title="Temp (°C)"),
-                template="simple_white", hovermode="x unified", height=400
-            )
-            st.plotly_chart(fig_p, use_container_width=True)
+        with st.expander("ℹ️ How to read this heatmap"):
+            st.write("This map shows solar intensity for every hour of every day in a typical year. Darker red indicates peak sunshine (typically 11 AM - 2 PM). The vertical axis represents the 24 hours of a day, and the horizontal axis represents 365 days.")
 
-        with t2:
-            st.header("📅 Monthly Breakdown")
-            col1, col2 = st.columns(2)
-            ghi_m = compute_monthly_means(data['ghi'])
-            temp_m = compute_monthly_means(data['temp'])
-            indices = monthly_indices()
+    with t_mon:
+        ghi_m = compute_monthly_means(res['data']['ghi'])
+        pv_m = [res['pv_power'][idx].sum()/1000 for idx in monthly_indices()]
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(px.bar(x=months, y=ghi_m, title="Monthly Avg Irradiance (W/m²)", color_discrete_sequence=['#F59E0B'], labels={'x':'Month', 'y':'W/m²'}), use_container_width=True)
+        with c2:
+            st.plotly_chart(px.bar(x=months, y=pv_m, title="Monthly Solar Yield (MWh)", color_discrete_sequence=['#3B82F6'], labels={'x':'Month', 'y':'MWh'}), use_container_width=True)
             
-            with col1:
-                st.plotly_chart(px.bar(x=list(range(1,13)), y=ghi_m, title="Monthly GHI (W/m²)", labels={'x':'Month', 'y':'W/m²'}, color_discrete_sequence=['#F59E0B']), use_container_width=True)
-            with col2:
-                st.plotly_chart(px.line(x=list(range(1,13)), y=temp_m, title="Monthly Temp (°C)", labels={'x':'Month', 'y':'°C'}, color_discrete_sequence=['#EF4444']), use_container_width=True)
+        st.markdown("<div class='sub-header'>Monthly Yield Table</div>", unsafe_allow_html=True)
+        mon_df = pd.DataFrame({"Month": months, "Irradiance (W/m²)": ghi_m, "Solar Yield (kWh)": [p*1000 for p in pv_m]})
+        st.dataframe(mon_df.style.format({"Irradiance (W/m²)": "{:.1f}", "Solar Yield (kWh)": "{:,.0f}"}), use_container_width=True)
+        
+        st.divider()
+        st.subheader("🗓️ Seasonal Maintenance Planner")
+        best_mon = months[np.argmax(pv_m)]
+        worst_mon = months[np.argmin(pv_m)]
+        
+        st.write(f"**Peak Generation Month:** {best_mon} (Maximize cleaning during this month!)")
+        st.write(f"**Lowest Generation Month:** {worst_mon} (Ideal time for scheduled inverter maintenance)")
+        
+        st.info("💡 **Pro-Tip:** Cleaning your panels once every 15 days can increase yield by up to 10-15%, especially in dusty regions.")
 
-            st.subheader("🗓️ Seasonal Planner & Bill Estimator")
-            plan1, plan2 = st.columns(2)
-            with plan1:
-                st.info("**Best Month:** May (Peak Sun)\n\n**Worst Month:** July (Monsoon Clouding)\n\n**Maintenance Note:** Schedule panel cleaning in Oct-Nov post-monsoon for peak winter yield.")
-            with plan2:
-                current_bill = st.number_input("Current monthly bill (₹)", value=2500)
-                savings = roi['annual_savings_inr_yr1'] / 12.0
-                st.success(f"Estimated Post-Solar Bill: **₹{max(0, current_bill - savings):.0f}**\n\nMonthly Savings: ₹{savings:.0f}")
+    with t_prof:
+        g24 = res['data']['ghi'].reshape(365, 24).mean(axis=0)
+        t24 = res['data']['temp'].reshape(365, 24).mean(axis=0)
+        p24 = res['pv_power'].reshape(365, 24).mean(axis=0)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            fig_g = go.Figure()
+            fig_g.add_trace(go.Scatter(x=list(range(24)), y=g24, name="Irradiance", fill='tozeroy', line=dict(color='#F59E0B')))
+            fig_g.update_layout(title="Typical 24h Solar Cycle", xaxis_title="Hour", yaxis_title="W/m²", template="simple_white")
+            st.plotly_chart(fig_g, use_container_width=True)
+        with c2:
+            fig_t = go.Figure()
+            fig_t.add_trace(go.Scatter(x=list(range(24)), y=t24, name="Temperature", line=dict(color='#EF4444')))
+            fig_t.update_layout(title="Typical 24h Temp Cycle", xaxis_title="Hour", yaxis_title="°C", template="simple_white")
+            st.plotly_chart(fig_t, use_container_width=True)
+            
+        st.plotly_chart(px.line(x=list(range(24)), y=p24, title="Typical 24h Power Generation (Watts)", labels={'x':'Hour','y':'Watts'}, color_discrete_sequence=['#10B981']), use_container_width=True)
 
-            st.subheader("Monthly Table")
-            m_df = pd.DataFrame({
-                "Month": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-                "GHI (W/m²)": ghi_m,
-                "Temp (°C)": temp_m,
-                "Wind (m/s)": [data['wind'][idx].mean() for idx in indices],
-                "Solar (MWh)": [data['pv_power'][idx].sum()/1000 for idx in indices],
-                "Wind (MWh)": [data['wind_power'][idx].sum()/1000 for idx in indices]
-            })
-            st.dataframe(m_df.style.format(precision=1), use_container_width=True)
+    with t_adv:
+        from energy_explore.advisor import generate_installation_advisory
+        adv = generate_installation_advisory(res['data'], st.session_state.loc["lat"])
+        
+        st.markdown("<div class='sub-header'>Solar Installation Parameters</div>", unsafe_allow_html=True)
+        a1, a2, a3 = st.columns(3)
+        a1.metric("Optimal Tilt", f"{adv['solar']['optimal_tilt']}°")
+        a2.metric("Optimal Azimuth", f"{adv['solar']['optimal_azimuth']}° (South)")
+        a3.metric("Min Row Spacing", f"{adv['solar']['min_row_spacing_m']:.2f} m")
+        
+        st.info(f"💡 By using the optimal tilt of {adv['solar']['optimal_tilt']}°, you can gain **{adv['solar']['gain_vs_flat_pct']:.1f}%** more energy compared to a flat installation.")
+        
+        st.markdown("<div class='sub-header'>Wind Resource Assessment</div>", unsafe_allow_html=True)
+        w1, w2, w3 = st.columns(3)
+        w1.metric("Recommended Height", f"{adv['wind']['recommended_height_m']} m")
+        w2.metric("Mean Speed @ Hub", f"{adv['wind']['height_data'][-1]['mean_speed_ms']:.1f} m/s")
+        w3.metric("Capacity Factor", f"{adv['wind']['capacity_factor_pct']:.1f}%")
+        
+        st.write("**Power Density by Height:**")
+        h_df = pd.DataFrame(adv['wind']['height_data'])
+        st.line_chart(h_df.set_index('height_m')['power_density_wm2'])
 
-        with t3:
-            if solar_kw > 0:
-                st.header("☀️ Solar Panel Installation")
-                s = adv["solar"]
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric("Optimal Tilt", f"{s['optimal_tilt']:.1f}°")
-                k2.metric("Facing Direction", "South (180°)")
-                k3.metric("Annual POA", f"{s['annual_poa_kwh']:.0f}", "kWh/m²")
-                k4.metric("Gain vs Flat", f"+{s['gain_vs_flat_pct']:.1f}%")
-                
-                if use_perez:
-                    st.success(f"✅ Perez 1990 Model Active | Perez vs Isotropic: +{s['perez_gain_vs_isotropic_pct']:.1f}%")
-                
-                cc1, cc2 = st.columns(2)
-                with cc1:
-                    st.write("**Physical Specifications**")
-                    st.table({
-                        "Tilt": f"{s['optimal_tilt']:.1f}°",
-                        "Azimuth": "180° (South)",
-                        "Min Row Spacing": f"{s['min_row_spacing_m']:.2f} m",
-                        "Row Pitch": f"{s['row_pitch_m']:.2f} m",
-                        "GCR": f"{s['gcr']:.2f}"
-                    })
-                with cc2:
-                    st.info(f"At {st.session_state.lat}°N latitude, solar panels perform best when facing South to catch the sun as it arcs through the southern sky throughout the year.")
+    with t_env:
 
-                st.subheader("🏢 Vendor Comparison")
-                st.write("Compare your site potential against top-tier Indian panel manufacturers.")
-                v_df = pd.DataFrame([
-                    {"Vendor": k, "Wattage": v["wattage"], "Efficiency": f"{v['eff']}%", "Bifacial": "✅" if v["bifacial"] else "❌", "Temp Coeff": v["temp_coeff"]}
-                    for k, v in VENDOR_PANELS.items()
-                ])
-                st.table(v_df)
-                st.info("Bifacial panels can provide 5-15% additional yield depending on albedo (ground reflectivity).")
-            
-            if wind_kw > 0:
-                st.header("💨 Wind Turbine Installation")
-                w = adv["wind"]
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric("Recommended Hub Height", f"{w['recommended_height_m']}m")
-                k2.metric("Mean Speed", f"{w['height_data'][-1]['mean_speed_ms']:.1f} m/s")
-                k3.metric("Consistency (k)", f"{w['k']:.2f}")
-                k4.metric("Dominant Direction", "West (Typical)")
+        st.markdown("<div class='sub-header'>Environmental Impact Metrics</div>", unsafe_allow_html=True)
+        e1, e2, e3 = st.columns(3)
+        e1.metric("Coal Saved", f"{res['env']['coal_saved_kg_yr']:.0f} kg/yr")
+        e2.metric("Homes Powered", f"{res['env']['homes_powered']} homes")
+        e3.metric("CO₂ Offset (25yr)", f"{res['env']['co2_avoided_tonnes_yr']*25:.1f} tonnes")
+        
+        st.info(f"💡 Your {solar_kw} kW system is equivalent to planting {res['env']['trees_equivalent']} mature trees every year in terms of carbon sequestration.")
 
-        with t4:
-            st.header("💰 Financial Analysis")
-            if apply_subsidy:
-                st.success(f"PM Surya Ghar Muft Bijli Yojana ✅ | Subsidy: ₹{roi['net_capex_inr']-roi['gross_capex_inr']:,.0f}")
+elif nav == "Comparison":
+    st.markdown("<div class='main-header'>⚖️ Location Comparison</div>", unsafe_allow_html=True)
+    st.write("Compare solar potential and financial returns between two Indian cities.")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("📍 Location 1")
+        pin1 = st.text_input("PIN Code 1", value=st.session_state.pincode, key="pin1")
+        nomi = pgeocode.Nominatim('in')
+        geo1 = nomi.query_postal_code(pin1)
+        if not pd.isna(geo1.latitude):
+            loc1 = {"lat": round(geo1.latitude*4)/4, "lon": round(geo1.longitude*4)/4, "name": geo1.place_name, "state": geo1.state_name}
+            data1, _ = get_weather(loc1["lat"], loc1["lon"], 200.0)
+            pv1 = simulate_pv_power(data1['ghi'], data1['temp'], solar_kw)
+            sub1 = pm_surya_ghar_subsidy(solar_kw)
+            roi1 = get_detailed_roi(pv1.sum()/1000, solar_kw, c_in, t_in, n_in, sub1["subsidy_inr"], sc_in)
             
-            k1, k2, k3, k4, k5 = st.columns(5)
-            k1.metric("Simple Payback", f"{roi['simple_payback_yr']:.1f} Yrs")
-            k2.metric("LCOE", f"₹{roi['lcoe_inr_per_kwh']:.2f}/kWh")
-            k3.metric("25yr NPV", f"₹{roi['npv_25yr_inr']/1e5:.2f} L")
-            k4.metric("IRR", f"{roi['irr_pct']:.1f}%")
-            k5.metric("CO2 Saved", f"{roi['co2_avoided_tonnes_yr']:.1f}", "tonnes/yr")
+            st.metric("Annual Yield", f"{pv1.sum()/1000:.1f} MWh")
+            st.metric("Payback", f"{roi1['simple_payback_yr']:.1f} Yrs")
+            st.metric("Avg GHI", f"{data1['ghi'].mean()*24/1000:.2f} kWh/m²")
             
-            st.subheader("Cash Flow Forecast")
-            yby = pd.DataFrame(roi["year_by_year"])
-            fig_cf = go.Figure()
-            fig_cf.add_trace(go.Scatter(x=yby["year"], y=yby["cumulative_savings"]/1e5, name="Cumulative Savings", fill='tozeroy'))
-            fig_cf.add_hline(y=roi["net_capex_inr"]/1e5, line_dash="dash", line_color="red", annotation_text="Investment")
-            fig_cf.update_layout(yaxis_title="₹ Lakhs", template="simple_white")
-            st.plotly_chart(fig_cf, use_container_width=True)
+    with c2:
+        st.subheader("📍 Location 2")
+        pin2 = st.text_input("PIN Code 2", value="411001", key="pin2") # Pune as default
+        geo2 = nomi.query_postal_code(pin2)
+        if not pd.isna(geo2.latitude):
+            loc2 = {"lat": round(geo2.latitude*4)/4, "lon": round(geo2.longitude*4)/4, "name": geo2.place_name, "state": geo2.state_name}
+            data2, _ = get_weather(loc2["lat"], loc2["lon"], 200.0)
+            pv2 = simulate_pv_power(data2['ghi'], data2['temp'], solar_kw)
+            sub2 = pm_surya_ghar_subsidy(solar_kw)
+            roi2 = get_detailed_roi(pv2.sum()/1000, solar_kw, c_in, t_in, n_in, sub2["subsidy_inr"], sc_in)
+            
+            st.metric("Annual Yield", f"{pv2.sum()/1000:.1f} MWh", delta=f"{(pv2.sum()-pv1.sum())/1000:.1f}")
+            st.metric("Payback", f"{roi2['simple_payback_yr']:.1f} Yrs", delta=f"{roi2['simple_payback_yr']-roi1['simple_payback_yr']:.1f}", delta_color="inverse")
+            st.metric("Avg GHI", f"{data2['ghi'].mean()*24/1000:.2f} kWh/m²", delta=f"{data2['ghi'].mean()*24/1000 - data1['ghi'].mean()*24/1000:.2f}")
 
-        with t5:
-            st.header("✅ Data Quality")
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Solar RMSE", f"{metrics['ghi_monthly_rmse']:.1f} W/m²")
-            k2.metric("Temp RMSE", f"{metrics['temp_monthly_rmse']:.1f}°C")
-            k3.metric("Wind RMSE", f"{metrics['wind_monthly_rmse']:.1f} m/s")
-            
-            st.subheader("Monthly Bias (MBE)")
-            st.bar_chart(metrics["ghi_monthly_mbe"], color="#F59E0B")
-            
-            st.subheader("Statistical Diagnostics")
-            diag = pd.DataFrame({
-                "Variable": ["GHI", "Temp", "Wind"],
-                "RMSE": [metrics["ghi_monthly_rmse"], metrics["temp_monthly_rmse"], metrics["wind_monthly_rmse"]],
-                "Lag-1 Autocorr": [metrics["ghi_lag1_autocorr"], metrics["temp_lag1_autocorr"], metrics["wind_lag1_autocorr"]],
-                "Skewness": [metrics['ghi_skewness'], metrics["temp_skewness"], metrics["wind_skewness"]]
-            })
-            st.table(diag)
-
-        with t6:
-            st.header("📄 Export Results")
-            pdf_data = generate_pdf_report(
-                st.session_state.place_name, st.session_state.lat, st.session_state.lon,
-                st.session_state.elev, clim, data, adv, roi, solar_kw, wind_kw, clim["nasa_data_used"]
-            )
-            st.download_button("⬇ Download PDF Report", data=pdf_data, file_name=f"enerlytics_{pincode}.pdf", mime="application/pdf")
-            
-            epw_str = generate_epw_string(data, st.session_state.lat, st.session_state.lon, st.session_state.elev, st.session_state.place_name, clim)
-            st.download_button("⬇ Download EnergyPlus Weather (EPW)", data=epw_str, file_name=f"{pincode}.epw", mime="text/plain")
-
-        with t7:
-            st.header("🆚 Comparison Mode")
-            st.write("Compare current location with another PIN code.")
-            comp_pin = st.text_input("Enter second PIN code to compare", max_chars=6, key="comp_pin")
-            
-            if comp_pin and len(comp_pin) == 6:
-                nomi = pgeocode.Nominatim('in')
-                res2 = nomi.query_postal_code(comp_pin)
-                if res2.latitude is not None and not np.isnan(res2.latitude):
-                    with st.spinner(f"Fetching data for {res2.place_name}..."):
-                        clim2 = fetch_nasa_power_climatology(res2.latitude, res2.longitude)
-                        row2 = {"grid_id": "comp", "lat": res2.latitude, "lon": res2.longitude, "elevation": 200, **clim2}
-                        data2 = generate_cell(row2)
-                        data2['pv_power'] = simulate_pv_power(data2['ghi'], data2['temp'], capacity_kw=solar_kw)
-                        
-                        c1, c2, c3 = st.columns([1, 1, 0.5])
-                        with c1:
-                            st.metric(f"📍 {st.session_state.place_name}", f"{data['ghi'].mean()*24/1000:.2f} kWh/m²")
-                        with c2:
-                            st.metric(f"📍 {res2.place_name}", f"{data2['ghi'].mean()*24/1000:.2f} kWh/m²")
-                        with c3:
-                            diff = (data2['ghi'].mean() - data['ghi'].mean()) / data['ghi'].mean() * 100
-                            st.metric("Delta", f"{diff:+.1f}%", delta_color="normal")
-                        
-                        # Comparison Chart
-                        fig_comp = go.Figure()
-                        fig_comp.add_trace(go.Bar(name=st.session_state.place_name, x=list(range(1,13)), y=compute_monthly_means(data['ghi'])))
-                        fig_comp.add_trace(go.Bar(name=res2.place_name, x=list(range(1,13)), y=compute_monthly_means(data2['ghi'])))
-                        fig_comp.update_layout(title="Monthly GHI Comparison (W/m²)", barmode='group')
-                        st.plotly_chart(fig_comp, use_container_width=True)
-                else:
-                    st.error("Invalid second PIN code.")
-
-        with t8:
-            st.header("🗺️ Location Intelligence")
-            st.write("Regional solar potential across India. High GHI regions are shown in amber/red.")
-            
-            # India-wide solar potential (reference cities)
-            map_data = pd.DataFrame({
-                'City': ['Delhi', 'Mumbai', 'Pune', 'Ahmedabad', 'Jodhpur', 'Bengaluru', 'Chennai', 'Kolkata', 'Guwahati', 'Leh', 
-                         'Indore', 'Bhopal', 'Nagpur', 'Hyderabad', 'Kochi', 'Madurai', 'Vizag', 'Patna', 'Ranchi', 'Raipur', 
-                         'Chandigarh', 'Amritsar', 'Dehradun', 'Srinagar', 'Shimla', 'Jaipur', 'Udaipur', 'Surat', 'Rajkot', 'Nashik'],
-                'Lat': [28.6, 19.1, 18.5, 23.0, 26.3, 12.9, 13.0, 22.5, 26.1, 34.1, 
-                        22.7, 23.2, 21.1, 17.4, 9.9, 9.9, 17.7, 25.6, 23.4, 21.2, 
-                        30.7, 31.6, 30.3, 34.1, 31.1, 26.9, 24.6, 21.2, 22.3, 20.0],
-                'Lon': [77.2, 72.8, 73.8, 72.6, 73.0, 77.6, 80.2, 88.3, 91.7, 77.5, 
-                        75.9, 77.4, 79.1, 78.5, 76.3, 78.1, 83.3, 85.1, 85.3, 81.6, 
-                        76.8, 74.9, 78.0, 74.8, 77.2, 75.8, 73.7, 72.8, 70.8, 73.8],
-                'GHI_kWh': [5.2, 5.0, 5.1, 5.8, 6.2, 5.4, 5.5, 4.8, 4.2, 5.5, 
-                            5.4, 5.3, 5.2, 5.4, 4.9, 5.6, 5.3, 4.9, 5.1, 5.2, 
-                            5.0, 4.9, 4.7, 4.4, 4.5, 5.6, 5.7, 5.6, 5.8, 5.2]
-            })
-            
-            # Add current location
-            curr_loc = pd.DataFrame({
-                'City': [st.session_state.place_name],
-                'Lat': [st.session_state.lat],
-                'Lon': [st.session_state.lon],
-                'GHI_kWh': [data['ghi'].mean()*24/1000]
-            })
-            map_data = pd.concat([map_data, curr_loc], ignore_index=True)
-            
-            fig_map = px.scatter_mapbox(
-                map_data, lat="Lat", lon="Lon", color="GHI_kWh", size="GHI_kWh",
-                hover_name="City", hover_data=["GHI_kWh"],
-                color_continuous_scale="YlOrRd", zoom=3.5, height=600,
-                mapbox_style="carto-positron"
-            )
-            st.plotly_chart(fig_map, use_container_width=True)
-            st.info("The map shows annual average GHI (kWh/m²/day). Jodhpur and Ahmedabad are among the highest potential regions in India.")
+    if not pd.isna(geo1.latitude) and not pd.isna(geo2.latitude):
+        st.divider()
+        st.subheader("Monthly Comparison (MWh)")
+        pv1_m = [pv1[idx].sum()/1000 for idx in monthly_indices()]
+        pv2_m = [pv2[idx].sum()/1000 for idx in monthly_indices()]
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        
+        comp_df = pd.DataFrame({
+            "Month": months,
+            loc1["name"]: pv1_m,
+            loc2["name"]: pv2_m
+        })
+        st.plotly_chart(px.line(comp_df, x="Month", y=[loc1["name"], loc2["name"]], markers=True, title="Monthly Yield Comparison"), use_container_width=True)
 
 elif nav == "System Sizer":
-    st.title("📏 Solar System Sizer")
+    st.markdown("<div class='main-header'>📏 Solar System Sizer</div>", unsafe_allow_html=True)
     
-    tab_sizer, tab_audit, tab_compare = st.tabs(["⚡ Quick Sizer", "💡 Energy Audit", "🆚 Source Comparison"])
-
-    with tab_sizer:
-        st.write("Enter your monthly bill or build your load from appliances — we calculate the exact system you need.")
-        
-        # Mode Toggle
-        sizer_mode = st.radio("Sizing Mode", ["Quick Input", "Appliance Load Builder"], horizontal=True, key="sizer_mode")
-        
-        col1, col2 = st.columns([1, 1])
-        
+    t_quick, t_app, t_audit, t_compare = st.tabs(["⚡ Quick Sizer", "🏠 Appliance Builder", "🔍 Energy Audit", "⚖️ Source Comparison"])
+    
+    with t_quick:
+        col1, col2 = st.columns([1, 1.5])
         with col1:
-            st.subheader("Load Input")
-            if sizer_mode == "Quick Input":
-                monthly_units = st.slider("Monthly units (kWh)", 50, 2000, 300, key="monthly_units_slider")
-            else:
-                # Appliance Load Builder logic
-                st.info("Build your load below. Monthly units will be calculated automatically.")
-                
-                # Default appliance profile
-                if "appliances" not in st.session_state:
-                    st.session_state.appliances = [dict(a) for a in DEFAULT_APPLIANCES]
-                
-                # Edit Appliances
-                for idx, app in enumerate(st.session_state.appliances):
-                    cols = st.columns([2, 1, 1, 0.5])
-                    with cols[0]:
-                        st.write(f"**{app['name']}** ({app['watts']}W)")
-                    with cols[1]:
-                        new_hrs = st.number_input(f"Hrs/Day", value=float(app['hours']), key=f"hrs_{idx}", min_value=0.0, max_value=24.0, step=0.5)
-                        st.session_state.appliances[idx]['hours'] = new_hrs
-                    
-                    kwh_mo = (app['watts'] * new_hrs * 30) / 1000.0
-                    with cols[2]:
-                        st.write(f"{kwh_mo:.1f} kWh/mo")
-                    with cols[3]:
-                        if st.button("❌", key=f"del_{idx}"):
-                            st.session_state.appliances.pop(idx)
-                            st.rerun()
-                
-                # Add appliance
-                with st.expander("➕ Add Appliance"):
-                    addon_names = [a["name"] for a in ADDON_APPLIANCES]
-                    new_app_name = st.selectbox("Select appliance", addon_names, key="new_app_name")
-                    if st.button("Add", key="add_app_btn"):
-                        new_app = next(a for a in ADDON_APPLIANCES if a["name"] == new_app_name)
-                        st.session_state.appliances.append(dict(new_app))
-                        st.rerun()
-                
-                load_data = compute_load(st.session_state.appliances)
-                monthly_units = load_data["monthly_kwh"]
-                st.success(f"Calculated Monthly Load: **{monthly_units:.1f} kWh**")
-
-            sun_hours_key = st.selectbox("Location type", list(REGION_SUN_HOURS.keys()), key="sun_hours_key")
-            sun_hours = REGION_SUN_HOURS[sun_hours_key]
-            self_cons = st.slider("Self-consumption %", 50, 100, 80, key="self_cons_slider")
-            sys_eff = st.slider("System efficiency %", 50, 100, 80, key="sys_eff_slider")
-            include_battery = st.checkbox("Include Battery Backup", value=False, key="include_battery_checkbox")
+            st.subheader("Consumption Details")
+            # Use custom units if set by appliance builder
+            units = st.number_input("Monthly Electricity Consumption (kWh)", 50, 10000, st.session_state.custom_units)
+            sun_type = st.selectbox("Your Region", list(REGION_SUN_HOURS.keys()))
             
-        # Calculate sizing using sizer.py engine
-        sizing = size_solar_system(
-            monthly_kwh=monthly_units, 
-            peak_sun_hours=sun_hours, 
-            self_consumption_pct=self_cons, 
-            system_efficiency_pct=sys_eff,
-            state_name=st.session_state.state_name,
-            include_battery=include_battery
-        )
-        
+            st.subheader("Panel Configuration")
+            vendor = st.selectbox("Select Panel Model", list(VENDOR_PANELS.keys()))
+            v_info = VENDOR_PANELS[vendor]
+            
+            sizing = size_solar_system(
+                units, 
+                peak_sun_hours=REGION_SUN_HOURS[sun_type], 
+                state_name=st.session_state.loc["state"],
+                panel_watt_peak=v_info["wattage"]
+            )
+            
+            st.markdown(f"""
+            <div class='info-card'>
+            <b>Sizing Rationale:</b><br>
+            Based on {REGION_SUN_HOURS[sun_type]} peak sun hours in your region and {v_info['brand']} {v_info['wattage']}W panels, a {sizing['solar_kw']} kW system is recommended.
+            </div>
+            """, unsafe_allow_html=True)
+            
         with col2:
-            st.subheader("Recommended System")
+            st.subheader("Technical Configuration")
             k1, k2, k3 = st.columns(3)
-            k1.metric("Solar Panels", f"{sizing['solar_kw']} kW")
-            k2.metric("Inverter", f"{sizing['inverter_kva']} kVA")
-            k3.metric("Battery", f"{sizing['battery_kwh']} kWh" if sizing['battery_kwh'] > 0 else "None")
-            
-            k4, k5, k6 = st.columns(3)
-            k4.metric("Panel Count", f"{sizing['panel_count']} nos")
-            k5.metric("Roof Area", f"{sizing['roof_area_m2']} m²")
-            k6.metric("Daily Gen.", f"{sizing['daily_gen_kwh']} kWh")
+            k1.metric("System Size", f"{sizing['solar_kw']} kW")
+            k2.metric("Total Panels", f"{sizing['panel_count']} nos")
+            k3.metric("Roof Area", f"{sizing['roof_area_m2']} m²")
             
             st.divider()
-            st.subheader("Cost & Savings (2025 India)")
+            st.subheader("Financial Estimate")
             c1, c2 = st.columns(2)
-            c1.metric("Gross Cost", f"₹{sizing['capex_inr']/1e5:.2f} L")
-            c2.metric("Net Cost (after subsidy)", f"₹{sizing['net_capex_inr']/1e5:.2f} L")
-            st.caption(sizing["subsidy_note"])
+            c1.metric("Net Cost (After Subsidy)", f"₹{sizing['net_capex_inr']/1e5:.2f} Lakhs")
+            c2.metric("Annual Savings", f"₹{sizing['annual_savings_inr']/1e3:.1f} K")
+            st.success(sizing["subsidy_note"])
             
-            c3, c4 = st.columns(2)
-            c3.metric("Annual Savings", f"₹{sizing['annual_savings_inr']/1e3:.1f} K/yr")
-            c4.metric("Payback Period", f"{sizing['simple_payback_yr']} years")
+            with st.expander("🛠️ System Specs"):
+                st.write(f"- **Inverter Capacity:** {sizing['inverter_kva']} kVA")
+                st.write(f"- **Panel Rating:** {sizing['panel_wp']} Wp {v_info['type']}")
+                st.write(f"- **Daily Generation:** ~{sizing['daily_gen_kwh']} kWh")
+                st.write(f"- **LCOE:** ₹{sizing['lcoe_inr_per_kwh']}/kWh")
 
-            st.divider()
-            st.subheader("Environmental Impact")
-            e1, e2, e3 = st.columns(3)
-            e1.metric("CO₂ Avoided", f"{sizing['co2_avoided_kg_yr']} kg/yr")
-            e2.metric("Trees Equivalent", f"{sizing['trees_equivalent']} trees")
-            e3.metric("Coal Saved", f"{sizing['coal_saved_kg_yr']} kg/yr")
-
-    with tab_audit:
-        st.subheader("💡 Energy Audit")
-        st.write("Analyze your consumption, get an energy rating, and find savings.")
+    with t_app:
+        st.subheader("Interactive Appliance Builder")
+        st.write("Build your household load by adding appliances and setting their daily usage.")
         
-        audit_col1, audit_col2 = st.columns(2)
-        with audit_col1:
-            home_type = st.selectbox("Home Type", ["apartment", "independent house", "villa"], key="home_type_select")
-            num_bedrooms = st.number_input("Number of Bedrooms", min_value=1, max_value=10, value=2, key="num_bedrooms_input")
-            num_ac = st.number_input("Number of AC Units", min_value=0, max_value=10, value=1, key="num_ac_input")
-            has_geyser = st.checkbox("Has Water Heater/Geyser", value=True, key="has_geyser_checkbox")
-            has_ev = st.checkbox("Has EV Charger", value=False, key="has_ev_checkbox")
+        # UI for adding appliances
+        with st.expander("➕ Add New Appliance"):
+            all_options = DEFAULT_APPLIANCES + ADDON_APPLIANCES
+            opt_names = [a["name"] for a in all_options]
+            selected_add = st.selectbox("Select Appliance", opt_names)
+            if st.button("Add to My List"):
+                to_add = next(a for a in all_options if a["name"] == selected_add)
+                st.session_state.appliances.append(dict(to_add))
+                st.rerun()
 
-        audit_res = energy_audit(
-            monthly_kwh=monthly_units,
-            num_ac_units=num_ac,
-            num_bedrooms=num_bedrooms,
-            has_geyser=has_geyser,
-            has_ev=has_ev,
-            home_type=home_type,
-            grid_tariff_inr=sizing["tariff_inr_kwh"]
-        )
+        # List of added appliances with editing
+        st.write("### Your Appliance List")
+        new_app_list = []
+        for i, app in enumerate(st.session_state.appliances):
+            c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
+            with c1: st.write(f"**{app['name']}**")
+            with c2: 
+                app["watts"] = st.number_input(f"Watts (W)", value=int(app["watts"]), key=f"w_{i}")
+            with c3:
+                app["hours"] = st.number_input(f"Hrs/Day", value=float(app["hours"]), key=f"h_{i}", step=0.5)
+            with c4:
+                if st.button("🗑️", key=f"del_{i}"):
+                    st.session_state.appliances.pop(i)
+                    st.rerun()
+            new_app_list.append(app)
+        st.session_state.appliances = new_app_list
 
-        with audit_col2:
-            st.metric("Energy Rating", f"{audit_res['energy_rating']}")
-            st.progress(audit_res['total_savings_potential_pct'] / 100)
-            st.write(f"Potential to save **{audit_res['total_savings_potential_pct']}%** of your monthly bill.")
-
-        st.subheader("Consumption Breakdown")
-        fig_audit = px.pie(
-            names=list(audit_res["category_labels"].values()), 
-            values=list(audit_res["breakdown_kwh"].values()), 
-            title=f"Monthly Consumption: {monthly_units} kWh",
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        st.plotly_chart(fig_audit, use_container_width=True)
-
-        st.subheader("Priority Efficiency Actions")
-        for action in audit_res["priority_actions"]:
-            with st.expander(f"**{action['priority']}**: {action['action']}"):
-                st.write(f"**Saving:** {action['saving']}")
-                st.write(f"**Cost:** {action['cost']}")
-
-    with tab_compare:
-        st.subheader("🆚 Energy Source Comparison")
-        st.write("Compare solar, wind, and hybrid options for your location.")
+        # Totals
+        from energy_explore.sizer import compute_load
+        load = compute_load(st.session_state.appliances)
         
-        mean_wind_speed = 3.5 # Placeholder, ideally from Explorer page
-        if st.session_state.generated:
-            mean_wind_speed = data['wind'].mean()
+        st.divider()
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Daily Consumption", f"{load['daily_kwh']:.2f} kWh")
+        m2.metric("Monthly Consumption", f"{load['monthly_kwh']:.1f} kWh")
+        m3.metric("Peak Load", f"{load['peak_kw']:.2f} kW")
+        
+        if st.button("✨ Use this as my monthly usage"):
+            st.session_state.custom_units = int(load['monthly_kwh'])
+            st.success(f"Monthly units updated to {st.session_state.custom_units} kWh! Switch to Quick Sizer to see results.")
+            st.rerun()
 
-        comp_options = compare_energy_sources(
-            monthly_kwh=monthly_units,
-            peak_sun_hours=sun_hours,
-            mean_wind_ms=mean_wind_speed,
-            state_name=st.session_state.state_name
-        )
+    with t_audit:
+        st.subheader("Detailed Household Energy Audit")
+        num_ac = st.number_input("Number of AC Units (1.5 Ton avg)", 0, 20, 1)
+        num_beds = st.number_input("Number of Bedrooms", 1, 10, 2)
+        home_type = st.selectbox("Home Type", ["apartment", "independent house", "villa"])
+        
+        audit = energy_audit(units, num_ac_units=num_ac, num_bedrooms=num_beds, home_type=home_type, grid_tariff_inr=t_in)
+        
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.markdown(f"**Energy Efficiency Rating: <span style='color:{audit['energy_rating_color']}'>{audit['energy_rating']}</span>**", unsafe_allow_html=True)
+            fig_audit = px.pie(
+                names=list(audit["category_labels"].values()), 
+                values=list(audit["breakdown_kwh"].values()), 
+                hole=0.4,
+                title="Monthly Usage Breakdown",
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            st.plotly_chart(fig_audit, use_container_width=True)
+            
+        with c2:
+            st.subheader("Priority Actions")
+            act_df = pd.DataFrame(audit["priority_actions"])
+            for _, row in act_df.iterrows():
+                with st.expander(f"{row['priority']}: {row['action']}"):
+                    st.write(f"**Potential Saving:** {row['saving']}")
+                    st.write(f"**Estimated Cost:** {row['cost']}")
 
-        cols = st.columns(len(comp_options))
-        for idx, opt in enumerate(comp_options):
-            with cols[idx]:
-                st.markdown(f"""
-                <div style="padding:15px; border-radius:10px; border:2px solid {opt['color'] if opt['recommended'] else '#ddd'}; height:100%">
-                    <h4 style="margin-top:0">{opt['option']} {'★' if opt['recommended'] else ''}</h4>
-                    <p><b>Capacity:</b> {opt['capacity']}</p>
-                    <p><b>Net Cost:</b> ₹{opt['net_capex_inr']/1e5:.2f} L</p>
-                    <p><b>Payback:</b> {opt['payback_yr']} yrs</p>
-                    <p style="font-size:0.8em; color:#666">{opt['note']}</p>
-                </div>
-                """, unsafe_allow_html=True)
+    with t_compare:
+        st.subheader("Energy Source Comparison")
+        comp = compare_energy_sources(units, peak_sun_hours=REGION_SUN_HOURS[sun_type], state_name=st.session_state.loc["state"])
+        
+        for opt in comp:
+            with st.container():
+                col_a, col_b, col_c = st.columns([1.5, 1, 2])
+                with col_a:
+                    st.markdown(f"### {opt['option']} {'⭐' if opt['recommended'] else ''}")
+                    st.write(f"**Capacity:** {opt['capacity']}")
+                with col_b:
+                    st.write(f"**Payback:** {opt['payback_yr']} Yrs")
+                    st.write(f"**Net Cost:** ₹{opt['net_capex_inr']/1e5:.2f} L")
+                with col_c:
+                    st.info(opt['note'])
+                st.divider()
 
-elif nav == "Financial Calculator":
-    st.title("💰 Standalone Solar Financial Calculator")
+elif nav == "ROI Analysis":
+    st.markdown("<div class='main-header'>💰 Financial & ROI Analysis</div>", unsafe_allow_html=True)
     
-    col1, col2 = st.columns(2)
-    with col1:
-        calc_cap = st.slider("System Capacity (kW)", 1, 100, 5)
-        calc_state = st.selectbox("Select State", list(DISCOM_TARIFFS.keys()))
-        state_info = get_state_tariff(calc_state)
-        calc_cost = st.number_input("Cost per kW (₹/kW)", value=55000)
-        calc_tariff = st.number_input("Tariff (₹/kWh)", value=state_info["tariff"], step=0.1)
-        calc_net_meter = st.number_input("Net Metering (₹/kWh)", value=state_info["net_meter"], step=0.1)
-        calc_subsidy_on = st.checkbox("Apply PM Surya Ghar Subsidy", value=True)
+    st.subheader("Investment & Return Summary")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Net Investment", f"₹{res['roi']['net_capex_inr']/1e5:.2f} L")
+    k2.metric("25-Yr Net Profit", f"₹{(sum(y['savings_inr'] for y in res['roi']['year_by_year']) - res['roi']['net_capex_inr'])/1e5:.2f} L")
+    k3.metric("IRR (Internal Rate of Return)", f"{res['roi']['irr_pct']:.1f}%")
+    k4.metric("LCOE (Cost per Unit)", f"₹{res['roi']['lcoe_inr_per_kwh']:.2f}/kWh")
+    
+    st.divider()
+    
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        st.subheader("25-Year Cumulative Savings")
+        yby = pd.DataFrame(res['roi']["year_by_year"])
+        fig_cf = go.Figure()
+        fig_cf.add_trace(go.Bar(x=yby["year"], y=yby["savings_inr"], name="Annual Savings", marker_color="#3B82F6"))
+        fig_cf.add_trace(go.Scatter(x=yby["year"], y=yby["cumulative_savings"], name="Cumulative Savings", line=dict(color="#F59E0B", width=3)))
+        fig_cf.update_layout(template="simple_white", height=450, xaxis_title="Year", yaxis_title="Rupees (₹)")
+        st.plotly_chart(fig_cf, use_container_width=True)
+    
+    with c2:
+        st.subheader("Financial Metrics")
+        st.write(f"**Net Present Value (NPV):** ₹{res['roi']['npv_25yr_inr']/1e5:.2f} Lakhs")
+        st.write(f"**Govt. Subsidy:** ₹{res['sub_info']['subsidy_inr']/1e3:.1f} K")
+        st.write(f"**Self-Consumption:** {sc_in}%")
+        st.write(f"**Grid Export:** {100-sc_in}%")
         
-    with col2:
-        # Default insolation 5.0 kWh/m2/day = 1825 kWh/kWp/year
-        default_insolation = 5.0
-        # If we have run a simulation, use that insolation
-        if st.session_state.generated:
-            current_insolation = data['ghi'].mean() * 24 / 1000.0
-            st.info(f"Using actual simulated insolation: {current_insolation:.2f} kWh/m²/day")
-        else:
-            current_insolation = default_insolation
-            st.info(f"Using default India insolation: {current_insolation:.2f} kWh/m²/day")
-            
-        annual_yield_kwh = calc_cap * current_insolation * 365
-        calc_subsidy = pm_surya_ghar_subsidy(calc_cap)["subsidy_inr"] if calc_subsidy_on else 0
+        st.markdown(f"""
+        <div class='info-card'>
+        <b>Pro Tip:</b><br>
+        An IRR of {res['roi']['irr_pct']:.1f}% is significantly higher than most fixed deposits or mutual funds, making rooftop solar one of the safest and highest-yielding investments.
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.subheader("Detailed Year-by-Year Financials")
+    st.dataframe(yby.style.format({
+        "energy_kwh": "{:,.0f}",
+        "savings_inr": "₹{:,.0f}",
+        "cumulative_savings": "₹{:,.0f}"
+    }), use_container_width=True)
+
+    st.divider()
+    st.subheader("🧾 Monthly Bill Estimator (Pre vs Post Solar)")
+    st.write("See how your electricity bill changes after installing solar.")
+    
+    # Simple bill calculation based on units and tariff
+    pre_solar_bill = units * t_in
+    # Post solar bill: units - solar_generation (self consumed + exported at net meter rate)
+    solar_gen_monthly = res['pv_power'].sum() / 12.0 # kWh/year to kWh/month
+    post_solar_units = max(0, units - solar_gen_monthly * (sc_in/100.0))
+    exported_units = solar_gen_monthly * (1 - sc_in/100.0)
+    post_solar_bill = (post_solar_units * t_in) - (exported_units * n_in)
+    
+    b1, b2, b3 = st.columns(3)
+    b1.metric("Pre-Solar Bill", f"₹{pre_solar_bill:,.0f}/mo")
+    b2.metric("Post-Solar Bill", f"₹{max(0, post_solar_bill):,.0f}/mo", delta=f"{max(0, post_solar_bill) - pre_solar_bill:,.0f}", delta_color="inverse")
+    b3.metric("Monthly Savings", f"₹{pre_solar_bill - max(0, post_solar_bill):,.0f}/mo")
+    
+    st.caption(f"Note: Based on {units} units/month consumption and {solar_kw} kW solar system.")
+
+    st.divider()
+    if st.button("📄 Generate & Download PDF Report", use_container_width=True):
+        from energy_explore.advisor import generate_installation_advisory
+        adv = generate_installation_advisory(res['data'], st.session_state.loc["lat"])
         
-        if st.button("Calculate Financials", use_container_width=True, type="primary"):
-            calc_roi = calculate_roi(annual_yield_kwh, calc_cap, calc_cost, calc_tariff, calc_net_meter, calc_subsidy)
-            
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Payback Period", f"{calc_roi['simple_payback_yr']:.1f} Yrs")
-            k2.metric("25yr NPV", f"₹{calc_roi['npv_25yr_inr']/1e5:.2f} L")
-            k3.metric("IRR", f"{calc_roi['irr_pct']:.1f}%")
-            
-            st.success(f"Estimated Annual Savings: ₹{calc_roi['annual_savings_inr']:.0f}")
+        # Prepare data for report (consolidate keys)
+        report_data = dict(res['data'])
+        report_data['pv_power'] = res['pv_power']
+        report_data['wind_power'] = res['wind_power']
+        
+        pdf_bytes = generate_pdf_report(
+            place_name=st.session_state.loc["name"],
+            lat=st.session_state.loc["lat"],
+            lon=st.session_state.loc["lon"],
+            elev=200.0,
+            clim=res['clim'],
+            data=report_data,
+            advisory=adv,
+            roi=res['roi'],
+            solar_kw=solar_kw,
+            wind_kw=wind_kw,
+            nasa_data_used=res['clim'].get('nasa_data_used', True)
+        )
+        st.download_button(
+            label="💾 Download PDF",
+            data=pdf_bytes,
+            file_name=f"ENERLYTICS_Report_{st.session_state.loc['name']}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
 
 elif nav == "About":
-    st.title("📖 About ENERLYTICS")
+    st.markdown("<div class='main-header'>📖 About ENERLYTICS</div>", unsafe_allow_html=True)
+    tab1, tab2, tab3, tab4 = st.tabs(["🚀 Project", "🧪 Calculations", "📖 Guide", "👤 Developer"])
     
-    tab_info, tab_calc, tab_guide, tab_dev = st.tabs([
-        "🚀 Project Overview", 
-        "🧪 Scientific Calculations", 
-        "📖 User Guide", 
-        "👤 About the Developer"
-    ])
-    
-    with tab_info:
+    with tab1:
         st.markdown("""
-        **ENERLYTICS** is a professional-grade solar and wind energy advisory platform specifically engineered for the Indian market.
+        ### ENERLYTICS: Energy Intelligence for a Sustainable Future
+        **ENERLYTICS** is a professional-grade solar and wind energy advisory platform designed specifically for the Indian market. 
+        It bridges the gap between complex climate science and practical, actionable energy solutions.
         
-        ### 🚀 Advanced Features
-        - **System Sizer**: Interactive calculator with **Quick Input** and **Appliance Load Builder** modes.
-        - **Comparison Mode**: Side-by-side analysis of two different PIN codes.
-        - **Bill Estimator**: Real-time post-solar electricity bill forecasting.
-        - **Seasonal Planner**: Intelligent maintenance scheduling based on monsoon cycles.
+        #### Core Features:
+        - **NASA-Powered Data**: Utilizes 30 years of satellite-derived meteorological data.
+        - **Precision Modeling**: Implements the Perez Anisotropic Sky Model for solar yield.
+        - **Financial Engineering**: Detailed ROI, NPV, and IRR calculations aligned with Indian subsidy schemes.
+        - **Load Auditing**: Intelligent appliance-level load estimation and efficiency advisory.
         """)
         
-    with tab_calc:
+    with tab2:
         st.subheader("Scientific Methodology")
-        
         with st.expander("☀️ Solar Irradiance Modeling"):
-            st.markdown(r"""
-            - **Synthesis**: We use a stochastic **AR(1)** (Autoregressive Integrated Moving Average) process to synthesize hourly GHI from monthly NASA means, maintaining realistic daily variance.
-            - **Separation**: The **Reindl Model** (a 3-interval piecewise function) is used to split Global Horizontal Irradiance (GHI) into Direct Normal (DNI) and Diffuse Horizontal (DHI) components based on the clearness index ($K_t$).
-            - **Transposition**: The **Perez 1990 Anisotropic Sky Model** is our primary engine for calculating Plane of Array (POA) irradiance. It accounts for:
-                - **Circumsolar brightening** (the bright area around the solar disk).
-                - **Horizon brightening** (brightening near the horizon in clear skies).
-                - This model is 5-15% more accurate than standard isotropic models for tropical climates like India.
-            """)
-            
-        with st.expander("💨 Wind Resource Assessment"):
-            st.markdown(r"""
-            - **Weibull Distribution**: We fit the hourly wind speed series to a Weibull probability density function to determine the **k (shape)** and **c (scale)** parameters, which are critical for turbine selection.
-            - **Hellmann Power Law**: To evaluate potential at different hub heights (30m to 100m), we use the Hellmann exponent ($\alpha$):
-                $$v_h = v_{ref} \cdot (h / h_{ref})^\alpha$$
-                Default exponents are adjusted based on terrain (e.g., 0.143 for open flat, 0.25 for suburban).
-            """)
-            
-        with st.expander("💰 Financial Engineering"):
             st.markdown("""
-            - **LCOE (Levelized Cost of Energy)**: Calculated by discounting all lifetime costs (CAPEX + OPEX) and dividing by the total discounted energy generated over 25 years.
-            - **IRR (Internal Rate of Return)**: Computed using the Newton-Raphson method on the project's net cash flows, accounting for 0.5% annual degradation and 3% tariff escalation.
-            - **Subsidy Logic**: Directly implements the FY2024-25 MNRE slabs:
-                - 1 kW: ₹30,000
-                - 2 kW: ₹60,000
-                - 3 kW+: Capped at ₹78,000
+            1. **Stochastic Synthesis**: We use an Auto-Regressive AR(1) process to generate realistic hourly data from monthly NASA means.
+            2. **DNI/DHI Splitting**: The Reindl model is used to separate Global Horizontal Irradiance into Direct and Diffuse components.
+            3. **Transposition**: We implement the **Perez 1990 Anisotropic Sky Model**, which accounts for circumsolar and horizon brightening, providing 5-15% higher accuracy than standard isotropic models.
             """)
-
-    with tab_guide:
-        st.subheader("How to Use ENERLYTICS")
-        st.markdown("""
-        1. **Location**: Enter your 6-digit Indian PIN code in the sidebar. The system will auto-snap to the nearest 0.25° grid point.
-        2. **System Design**: Input your planned Solar and Wind capacity. Toggle the **Perez Model** for higher accuracy.
-        3. **Financials**: Open the 'Financial Inputs' expander to adjust grid tariffs and net-metering rates based on your specific DISCOM (defaults are auto-filled by state).
-        4. **Analyze**: Click **Generate Synthetic Year + Analyse**.
-        5. **Review Tabs**:
-            - **Annual Summary**: High-level yields and heatmaps.
-            - **Monthly Breakdown**: Seasonal variation tables.
-            - **Installation Advisory**: Optimal tilt angles and row spacing.
-            - **Financial Analysis**: Payback periods and cash-flow charts.
-            - **Data Quality**: Statistical validation against NASA benchmarks.
-            - **Comparison Mode**: Side-by-side analysis of two different PIN codes.
-            - **Location Intelligence**: Interactive India-wide GHI potential map.
-        6. **Export**: Go to the **Export** tab to download a professional **PDF Report** or an **EPW File** for architectural software.
+        with st.expander("💨 Wind Assessment"):
+            st.markdown("""
+            1. **Weibull Distribution**: Wind speeds are modeled using the Weibull probability density function, fitting k (shape) and c (scale) parameters to the site data.
+            2. **Hellmann Power Law**: We extrapolate wind speeds from NASA's 10m reference height to hub heights up to 100m using site-specific roughness exponents.
+            """)
+        with st.expander("💰 Financial Logic"):
+            st.markdown("""
+            1. **ROI Analysis**: Includes panel degradation (0.5%/yr), tariff escalation (3%/yr), and O&M costs.
+            2. **LCOE**: Levelized Cost of Energy accounts for the time-value of money over a 25-year lifecycle.
+            3. **PM Surya Ghar**: Calculations are strictly aligned with the 2024-25 MNRE subsidy slabs (₹30k/kW up to 2kW, ₹78k cap).
+            """)
+            
+    with tab3:
+        st.subheader("How to Use the Platform")
+        st.info("""
+        1. **Explorer**: Start here to see your site's raw potential. Enter your PIN code and adjust capacity.
+        2. **System Sizer**: Use this if you don't know what capacity you need. Input your bill or appliances.
+        3. **ROI Analysis**: Check the deep financials. Adjust the 'Financial Overrides' in the sidebar for precision.
+        4. **Export**: Use the 'Download' buttons (where available) to save your data.
         """)
+        
+    with tab4:
+        st.markdown("""
+        ## 👤 About the Developer
 
-    with tab_dev:
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            st.image("https://img.icons8.com/clouds/200/user.png") # Placeholder or author image
-        with col2:
-            st.header("Himanshu Kumar Sahu")
-            st.markdown("""
-            Passionate about bridging the gap between high-fidelity climate science and practical energy solutions for the Indian subcontinent.
-            
-            - **Expertise**: Python, NumPy, Streamlit, Renewable Energy Physics.
-            - **Mission**: To democratize bankable energy data for every rooftop in India.
-            
-            [<img src="https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn"/>](http://www.linkedin.com/in/himansu-kumar-sahu-377916334)
-            [<img src="https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub"/>](https://github.com/himansu1211)
-            [<img src="https://img.shields.io/badge/Gmail-D14836?style=for-the-badge&logo=gmail&logoColor=white" alt="Email"/>](mailto:himansuk1211@gmail.com)
-            """, unsafe_allow_html=True)
+        **Himansu Kumar Sahu**
 
-def main():
-    """Streamlit entry point."""
-    import sys
-    import os
-    from streamlit.web import cli as stcli
-    
-    # Path to this file
-    this_file = os.path.abspath(__file__)
-    sys.argv = ["streamlit", "run", this_file]
-    sys.exit(stcli.main())
+        Passionate about bridging the gap between high-fidelity climate science and practical energy solutions for the Indian subcontinent.
+
+        [<img src="https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn"/>](http://www.linkedin.com/in/himansu-kumar-sahu-377916334)
+        [<img src="https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub"/>](https://github.com/himansu1211)
+        [<img src="https://img.shields.io/badge/Gmail-D14836?style=for-the-badge&logo=gmail&logoColor=white" alt="Email"/>](mailto:himansuk1211@gmail.com)
+        """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    main()
+    st.write("Please run this app using: `streamlit run src/energy_explore/app.py`")

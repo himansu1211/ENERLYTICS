@@ -12,24 +12,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-
-def _monthly_bar_bytes(ghi_monthly: np.ndarray) -> io.BytesIO:
-    """Creates a matplotlib monthly GHI bar chart as PNG bytes."""
-    plt.figure(figsize=(160/25.4, 50/25.4)) # mm to inches
-    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    plt.bar(months, ghi_monthly, color="#F59E0B")
-    plt.title("Monthly Average GHI (W/m²)", fontsize=10, pad=10)
-    plt.xticks(fontsize=8)
-    plt.yticks(fontsize=8)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    for spine in plt.gca().spines.values():
-        spine.set_visible(False)
-    
-    img_buffer = io.BytesIO()
-    plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
-    plt.close()
-    img_buffer.seek(0)
-    return img_buffer
+from energy_explore.core import monthly_indices
 
 def generate_pdf_report(
     place_name: str,
@@ -44,6 +27,24 @@ def generate_pdf_report(
     wind_kw: float,
     nasa_data_used: bool,
 ) -> bytes:
+    def _monthly_bar_bytes(ghi_monthly: np.ndarray) -> io.BytesIO:
+        """Creates a matplotlib monthly GHI bar chart as PNG bytes."""
+        plt.figure(figsize=(160/25.4, 50/25.4)) # mm to inches
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        plt.bar(months, ghi_monthly, color="#F59E0B")
+        plt.title("Monthly Average GHI (W/m²)", fontsize=10, pad=10)
+        plt.xticks(fontsize=8)
+        plt.yticks(fontsize=8)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        for spine in plt.gca().spines.values():
+            spine.set_visible(False)
+        
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
+        plt.close()
+        img_buffer.seek(0)
+        return img_buffer
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, 
@@ -153,9 +154,8 @@ def generate_pdf_report(
     elements.append(Spacer(1, 10*mm))
     
     # Monthly Chart
-    ghi_monthly = [data['ghi'][idx].mean() for idx in clim.get('monthly_indices', [])]
-    if not ghi_monthly: # Fallback if indices missing
-        ghi_monthly = [100.0] * 12 
+    indices = monthly_indices()
+    ghi_monthly = [data['ghi'][idx].mean() for idx in indices]
         
     chart_buffer = _monthly_bar_bytes(np.array(ghi_monthly))
     elements.append(Image(chart_buffer, width=160*mm, height=50*mm))

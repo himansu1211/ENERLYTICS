@@ -39,7 +39,7 @@ def compute_tilted_irradiance(
     Computes POA irradiance using either Perez (anisotropic) or Liu-Jordan (isotropic).
     """
     if use_perez:
-        from .perez import perez_poa_total
+        from energy_explore.perez import perez_poa_total
         # Ensure I0 is not None for Perez
         if I0 is None:
             I0 = np.full_like(ghi, 1367.0)

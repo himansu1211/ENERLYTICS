@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import hashlib
 from typing import Any
-from .config import GLOBAL_SEED
+from energy_explore.config import GLOBAL_SEED
 
 I_SC: float = 1367.0
 

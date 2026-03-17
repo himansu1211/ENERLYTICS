@@ -105,6 +105,16 @@ ADDON_APPLIANCES: list[dict] = [
     {"name": "Printer / scanner",      "watts": 100,  "hours": 1.0,  "category": "appliances"}, 
 ] 
 
+# ── Vendor panels (Benchmark Indian brands) ──────────────────────────────────
+VENDOR_PANELS = {
+    "Generic Mono-PERC (360W)": {"wattage": 360, "eff": 18.5, "type": "Mono-PERC", "brand": "Benchmark"},
+    "Waaree Bi-550 (Bifacial)": {"wattage": 550, "eff": 21.3, "type": "Bifacial Mono", "brand": "Waaree"},
+    "Adani Shine 540 (Mono)":   {"wattage": 540, "eff": 20.9, "type": "Mono-PERC", "brand": "Adani"},
+    "Vikram Somera 550 (Mono)": {"wattage": 550, "eff": 21.1, "type": "Mono-PERC", "brand": "Vikram"},
+    "Tata Power Solar 545":     {"wattage": 545, "eff": 21.0, "type": "Mono-PERC", "brand": "Tata"},
+    "Goldi HELOC 550":          {"wattage": 550, "eff": 21.3, "type": "Bifacial Mono", "brand": "Goldi"}
+}
+
 
 # ── Appliance helpers ───────────────────────────────────────────────────────── 
 
