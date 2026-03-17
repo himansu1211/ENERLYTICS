@@ -245,7 +245,7 @@ def size_solar_system(
         "solar_kw":          solar_kw, 
         "inverter_kva":      inverter_kva, 
         "battery_kwh":       battery_kwh, 
-        "panels":       panel_count, 
+        "panel_count":       panel_count, 
         "panel_wp":          int(panel_watt_peak), 
         "roof_area_m2":      roof_area_m2, 
         # Generation 
@@ -268,9 +268,9 @@ def size_solar_system(
         "simple_payback_yr": round(min(payback, 30.0), 1), 
         "lcoe_inr_per_kwh":  round(lcoe, 2), 
         # Environment 
-        "co2_kg_yr": round(co2_kg, 0), 
-        "trees_equiv":  trees, 
-        "coal_kg_yr":  round(coal_kg, 0), 
+        "co2_avoided_kg_yr": round(co2_kg, 0), 
+        "trees_equivalent":  trees, 
+        "coal_saved_kg_yr":  round(coal_kg, 0), 
         # Label 
         "size_label":        label, 
         "use_case":          use, 

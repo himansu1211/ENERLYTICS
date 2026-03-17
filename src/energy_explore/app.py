@@ -115,7 +115,7 @@ if nav == "Explorer":
         st.info("👈 Enter a PIN code and click 'Generate' in the sidebar to begin.")
     else:
         # 1. Fetch Data
-        with st.spinner("Fetching climatology..."):
+        with st.spinner("Fetching NASA climatology..."):
             clim = fetch_nasa_power_climatology(st.session_state.lat, st.session_state.lon)
             
         # 2. Synthesis
@@ -295,7 +295,7 @@ if nav == "Explorer":
                 "Variable": ["GHI", "Temp", "Wind"],
                 "RMSE": [metrics["ghi_monthly_rmse"], metrics["temp_monthly_rmse"], metrics["wind_monthly_rmse"]],
                 "Lag-1 Autocorr": [metrics["ghi_lag1_autocorr"], metrics["temp_lag1_autocorr"], metrics["wind_lag1_autocorr"]],
-                "Skewness": [metrics["ghi_skewness"], metrics["temp_skewness"], metrics["wind_skewness"]]
+                "Skewness": [metrics['ghi_skewness'], metrics["temp_skewness"], metrics["wind_skewness"]]
             })
             st.table(diag)
 
@@ -383,169 +383,211 @@ if nav == "Explorer":
 
 elif nav == "System Sizer":
     st.title("📏 Solar System Sizer")
-    st.write("Enter your monthly bill or build your load from appliances — we calculate the exact system you need.")
     
-    # Mode Toggle
-    sizer_mode = st.radio("Sizing Mode", ["Quick Input", "Appliance Load Builder"], horizontal=True)
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("Quick Input")
-        if sizer_mode == "Quick Input":
-            monthly_units = st.slider("Monthly units (kWh)", 50, 2000, 300)
-        else:
-            # Appliance Load Builder logic
-            st.info("Build your load below. Monthly units will be calculated automatically.")
-            
-            # Default appliance profile
-            if "appliances" not in st.session_state:
-                st.session_state.appliances = [dict(a) for a in DEFAULT_APPLIANCES]
-            
-            # Edit Appliances
-            for idx, app in enumerate(st.session_state.appliances):
-                cols = st.columns([2, 1, 1, 0.5])
-                with cols[0]:
-                    st.write(f"**{app['name']}** ({app['watts']}W)")
-                with cols[1]:
-                    new_hrs = st.number_input(f"Hrs/Day", value=float(app['hours']), key=f"hrs_{idx}", min_value=0.0, max_value=24.0, step=0.5)
-                    st.session_state.appliances[idx]['hours'] = new_hrs
+    tab_sizer, tab_audit, tab_compare = st.tabs(["⚡ Quick Sizer", "💡 Energy Audit", "🆚 Source Comparison"])
+
+    with tab_sizer:
+        st.write("Enter your monthly bill or build your load from appliances — we calculate the exact system you need.")
+        
+        # Mode Toggle
+        sizer_mode = st.radio("Sizing Mode", ["Quick Input", "Appliance Load Builder"], horizontal=True, key="sizer_mode")
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("Load Input")
+            if sizer_mode == "Quick Input":
+                monthly_units = st.slider("Monthly units (kWh)", 50, 2000, 300, key="monthly_units_slider")
+            else:
+                # Appliance Load Builder logic
+                st.info("Build your load below. Monthly units will be calculated automatically.")
                 
-                kwh_mo = (app['watts'] * new_hrs * 30) / 1000.0
-                with cols[2]:
-                    st.write(f"{kwh_mo:.1f} kWh/mo")
-                with cols[3]:
-                    if st.button("❌", key=f"del_{idx}"):
-                        st.session_state.appliances.pop(idx)
+                # Default appliance profile
+                if "appliances" not in st.session_state:
+                    st.session_state.appliances = [dict(a) for a in DEFAULT_APPLIANCES]
+                
+                # Edit Appliances
+                for idx, app in enumerate(st.session_state.appliances):
+                    cols = st.columns([2, 1, 1, 0.5])
+                    with cols[0]:
+                        st.write(f"**{app['name']}** ({app['watts']}W)")
+                    with cols[1]:
+                        new_hrs = st.number_input(f"Hrs/Day", value=float(app['hours']), key=f"hrs_{idx}", min_value=0.0, max_value=24.0, step=0.5)
+                        st.session_state.appliances[idx]['hours'] = new_hrs
+                    
+                    kwh_mo = (app['watts'] * new_hrs * 30) / 1000.0
+                    with cols[2]:
+                        st.write(f"{kwh_mo:.1f} kWh/mo")
+                    with cols[3]:
+                        if st.button("❌", key=f"del_{idx}"):
+                            st.session_state.appliances.pop(idx)
+                            st.rerun()
+                
+                # Add appliance
+                with st.expander("➕ Add Appliance"):
+                    addon_names = [a["name"] for a in ADDON_APPLIANCES]
+                    new_app_name = st.selectbox("Select appliance", addon_names, key="new_app_name")
+                    if st.button("Add", key="add_app_btn"):
+                        new_app = next(a for a in ADDON_APPLIANCES if a["name"] == new_app_name)
+                        st.session_state.appliances.append(dict(new_app))
                         st.rerun()
-            
-            # Add appliance
-            with st.expander("➕ Add Appliance"):
-                addon_names = [a["name"] for a in ADDON_APPLIANCES]
-                new_app_name = st.selectbox("Select appliance", addon_names)
-                if st.button("Add"):
-                    new_app = next(a for a in ADDON_APPLIANCES if a["name"] == new_app_name)
-                    st.session_state.appliances.append(dict(new_app))
-                    st.rerun()
-            
-            load_data = compute_load(st.session_state.appliances)
-            monthly_units = load_data["monthly_kwh"]
-            st.success(f"Calculated Monthly Load: **{monthly_units:.1f} kWh**")
+                
+                load_data = compute_load(st.session_state.appliances)
+                monthly_units = load_data["monthly_kwh"]
+                st.success(f"Calculated Monthly Load: **{monthly_units:.1f} kWh**")
 
-        sun_hours_key = st.selectbox("Location type", list(REGION_SUN_HOURS.keys()))
-        sun_hours = REGION_SUN_HOURS[sun_hours_key]
-        self_cons = st.slider("Self-consumption %", 50, 100, 80)
-        sys_eff = st.slider("System efficiency %", 50, 100, 80)
+            sun_hours_key = st.selectbox("Location type", list(REGION_SUN_HOURS.keys()), key="sun_hours_key")
+            sun_hours = REGION_SUN_HOURS[sun_hours_key]
+            self_cons = st.slider("Self-consumption %", 50, 100, 80, key="self_cons_slider")
+            sys_eff = st.slider("System efficiency %", 50, 100, 80, key="sys_eff_slider")
+            include_battery = st.checkbox("Include Battery Backup", value=False, key="include_battery_checkbox")
+            
+        # Calculate sizing using sizer.py engine
+        sizing = size_solar_system(
+            monthly_kwh=monthly_units, 
+            peak_sun_hours=sun_hours, 
+            self_consumption_pct=self_cons, 
+            system_efficiency_pct=sys_eff,
+            state_name=st.session_state.state_name,
+            include_battery=include_battery
+        )
         
-    # Calculate sizing using sizer.py engine
-    sizing = size_solar_system(
-        monthly_kwh=monthly_units, 
-        peak_sun_hours=sun_hours, 
-        self_consumption_pct=self_cons, 
-        system_efficiency_pct=sys_eff,
-        state_name=st.session_state.state_name
-    )
-    
-    with col2:
-        st.subheader("Recommended system")
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Solar panels", f"{sizing['solar_kw']} kW")
-        k2.metric("Inverter", f"{sizing['inverter_kva']} kVA")
-        k3.metric("Battery (opt.)", f"{sizing['battery_kwh']} kWh")
-        
-        k4, k5, k6 = st.columns(3)
-        k4.metric("Panel count", f"{sizing['panels']} nos")
-        k5.metric("Roof area", f"{sizing['roof_area_m2']} m²")
-        k6.metric("Daily gen.", f"{sizing['daily_gen_kwh']} kWh")
-        
-        st.divider()
-        st.subheader("Cost estimate (2025 India)")
-        c1, c2 = st.columns(2)
-        c1.metric("Gross CAPEX", f"₹{sizing['gross_capex_inr']/1e5:.2f} L")
-        c2.metric("After subsidy", f"₹{sizing['net_capex_inr']/1e5:.2f} L")
-        st.caption(sizing["subsidy_note"])
-        
-        c3, c4 = st.columns(2)
-        c3.metric("Annual savings", f"₹{sizing['annual_savings_inr']/1e3:.1f} K/yr")
-        c4.metric("Payback", f"{sizing['simple_payback_yr']} years")
-        
-        if st.button("🚀 Analyze this system in Explorer", use_container_width=True):
-            st.session_state.solar_kw = sizing['solar_kw']
-            st.session_state.nav = "Explorer"
-            st.rerun()
+        with col2:
+            st.subheader("Recommended System")
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Solar Panels", f"{sizing['solar_kw']} kW")
+            k2.metric("Inverter", f"{sizing['inverter_kva']} kVA")
+            k3.metric("Battery", f"{sizing['battery_kwh']} kWh" if sizing['battery_kwh'] > 0 else "None")
+            
+            k4, k5, k6 = st.columns(3)
+            k4.metric("Panel Count", f"{sizing['panel_count']} nos")
+            k5.metric("Roof Area", f"{sizing['roof_area_m2']} m²")
+            k6.metric("Daily Gen.", f"{sizing['daily_gen_kwh']} kWh")
+            
+            st.divider()
+            st.subheader("Cost & Savings (2025 India)")
+            c1, c2 = st.columns(2)
+            c1.metric("Gross Cost", f"₹{sizing['capex_inr']/1e5:.2f} L")
+            c2.metric("Net Cost (after subsidy)", f"₹{sizing['net_capex_inr']/1e5:.2f} L")
+            st.caption(sizing["subsidy_note"])
+            
+            c3, c4 = st.columns(2)
+            c3.metric("Annual Savings", f"₹{sizing['annual_savings_inr']/1e3:.1f} K/yr")
+            c4.metric("Payback Period", f"{sizing['simple_payback_yr']} years")
 
-    st.divider()
-    st.subheader("💡 Energy Audit Mode")
-    st.write("What's wasting your electricity? Estimate your load profile by category.")
-    
-    # Use sizer.py energy_audit engine
-    audit_res = energy_audit(
-        monthly_kwh=monthly_units,
-        num_ac_units=1,
-        num_bedrooms=2,
-        has_geyser=True,
-        has_ev=False,
-        home_type="apartment",
-        grid_tariff_inr=sizing["tariff_inr_kwh"]
-    )
-    
-    audit_col1, audit_col2 = st.columns(2)
-    with audit_col1:
+            st.divider()
+            st.subheader("Environmental Impact")
+            e1, e2, e3 = st.columns(3)
+            e1.metric("CO₂ Avoided", f"{sizing['co2_avoided_kg_yr']} kg/yr")
+            e2.metric("Trees Equivalent", f"{sizing['trees_equivalent']} trees")
+            e3.metric("Coal Saved", f"{sizing['coal_saved_kg_yr']} kg/yr")
+
+    with tab_audit:
+        st.subheader("💡 Energy Audit")
+        st.write("Analyze your consumption, get an energy rating, and find savings.")
+        
+        audit_col1, audit_col2 = st.columns(2)
+        with audit_col1:
+            home_type = st.selectbox("Home Type", ["apartment", "independent house", "villa"], key="home_type_select")
+            num_bedrooms = st.number_input("Number of Bedrooms", min_value=1, max_value=10, value=2, key="num_bedrooms_input")
+            num_ac = st.number_input("Number of AC Units", min_value=0, max_value=10, value=1, key="num_ac_input")
+            has_geyser = st.checkbox("Has Water Heater/Geyser", value=True, key="has_geyser_checkbox")
+            has_ev = st.checkbox("Has EV Charger", value=False, key="has_ev_checkbox")
+
+        audit_res = energy_audit(
+            monthly_kwh=monthly_units,
+            num_ac_units=num_ac,
+            num_bedrooms=num_bedrooms,
+            has_geyser=has_geyser,
+            has_ev=has_ev,
+            home_type=home_type,
+            grid_tariff_inr=sizing["tariff_inr_kwh"]
+        )
+
+        with audit_col2:
+            st.metric("Energy Rating", f"{audit_res['energy_rating']}")
+            st.progress(audit_res['total_savings_potential_pct'] / 100)
+            st.write(f"Potential to save **{audit_res['total_savings_potential_pct']}%** of your monthly bill.")
+
+        st.subheader("Consumption Breakdown")
         fig_audit = px.pie(
             names=list(audit_res["category_labels"].values()), 
             values=list(audit_res["breakdown_kwh"].values()), 
-            title=f"Monthly Consumption Breakdown: {audit_res['energy_rating']}",
+            title=f"Monthly Consumption: {monthly_units} kWh",
             color_discrete_sequence=px.colors.qualitative.Pastel
         )
         st.plotly_chart(fig_audit, use_container_width=True)
-        
-    with audit_col2:
-        st.write("**Priority Efficiency Actions**")
-        for action in audit_res["priority_actions"][:3]: # Show top 3
-            with st.expander(f"📌 {action['action']}"):
+
+        st.subheader("Priority Efficiency Actions")
+        for action in audit_res["priority_actions"]:
+            with st.expander(f"**{action['priority']}**: {action['action']}"):
                 st.write(f"**Saving:** {action['saving']}")
                 st.write(f"**Cost:** {action['cost']}")
-                st.write(f"**Priority:** {action['priority']}")
+
+    with tab_compare:
+        st.subheader("🆚 Energy Source Comparison")
+        st.write("Compare solar, wind, and hybrid options for your location.")
         
-        st.success(f"Total Efficiency Potential: **{audit_res['total_savings_potential_pct']}%** reduction possible.")
+        mean_wind_speed = 3.5 # Placeholder, ideally from Explorer page
+        if st.session_state.generated:
+            mean_wind_speed = data['wind'].mean()
 
-    st.divider()
-    st.subheader("🆚 Energy Source Comparison")
-    st.write("Compare solar vs wind vs hybrid options for your load.")
+        comp_options = compare_energy_sources(
+            monthly_kwh=monthly_units,
+            peak_sun_hours=sun_hours,
+            mean_wind_ms=mean_wind_speed,
+            state_name=st.session_state.state_name
+        )
+
+        cols = st.columns(len(comp_options))
+        for idx, opt in enumerate(comp_options):
+            with cols[idx]:
+                st.markdown(f"""
+                <div style="padding:15px; border-radius:10px; border:2px solid {opt['color'] if opt['recommended'] else '#ddd'}; height:100%">
+                    <h4 style="margin-top:0">{opt['option']} {'★' if opt['recommended'] else ''}</h4>
+                    <p><b>Capacity:</b> {opt['capacity']}</p>
+                    <p><b>Net Cost:</b> ₹{opt['net_capex_inr']/1e5:.2f} L</p>
+                    <p><b>Payback:</b> {opt['payback_yr']} yrs</p>
+                    <p style="font-size:0.8em; color:#666">{opt['note']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+elif nav == "Financial Calculator":
+    st.title("💰 Standalone Solar Financial Calculator")
     
-    # Assume default 3.5 m/s if no wind data yet
-    comp_options = compare_energy_sources(
-        monthly_kwh=monthly_units,
-        peak_sun_hours=sun_hours,
-        state_name=st.session_state.state_name
-    )
-    
-    cols = st.columns(len(comp_options))
-    for idx, opt in enumerate(comp_options):
-        with cols[idx]:
-            st.markdown(f"""
-            <div style="padding:15px; border-radius:10px; border:2px solid {opt['color'] if opt['recommended'] else '#ddd'}; height:100%">
-                <h4 style="margin-top:0">{opt['option']} {'✅' if opt['recommended'] else ''}</h4>
-                <p><b>Capacity:</b> {opt['capacity']}</p>
-                <p><b>Net Cost:</b> ₹{opt['net_capex_inr']/1e5:.2f} L</p>
-                <p><b>Payback:</b> {opt['payback_yr']} yrs</p>
-                <p style="font-size:0.8em; color:#666">{opt['note']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("What size means in practice")
-    s1, s2, s3, s4 = st.columns(4)
-    with s1:
-        st.info(f"**{sizing['size_label']}**\n\n{sizing['solar_kw']} kW\n\n{sizing['use_case']}")
-    with s2:
-        st.info("**Medium home**\n\n3–6 kW\n\n300–600 kWh/mo - 3BHK\n\n+ 1 AC, washing machine")
-    with s3:
-        st.info("**Large home / villa**\n\n6–10 kW\n\n600–1000 kWh/mo\n\nbungalow - 2+ ACs, EV charging")
-    with s4:
-        st.info("**Commercial / factory**\n\n10–500 kW\n\n1000+ kWh/mo - C&I\n\nground-mount, 3-phase")
-
-elif nav == "Financial Calculator":\   st.title("💰 Standalone Solar Financial Calculator")\n    \n    col1, col2 = st.columns(2)\n    with col1:\n        calc_cap = st.slider("System Capacity (kW)", 1, 100, 5)\n        calc_state = st.selectbox("Select State", list(DISCOM_TARIFFS.keys()))\n        state_info = get_state_tariff(calc_state)\n        calc_cost = st.number_input("Cost per kW (₹/kW)", value=55000)\n        calc_tariff = st.number_input("Tariff (₹/kWh)", value=state_info["tariff"], step=0.1)\n        calc_net_meter = st.number_input("Net Metering (₹/kWh)", value=state_info["net_meter"], step=0.1)\n        calc_subsidy_on = st.checkbox("Apply PM Surya Ghar Subsidy", value=True)\n        \n    with col2:\n        # Default insolation 5.0 kWh/m2/day = 1825 kWh/kWp/year\n        default_insolation = 5.0\n        # If we have run a simulation, use that insolation\n        if st.session_state.generated:\n            current_insolation = data['ghi'].mean() * 24 / 1000.0\n            st.info(f"Using actual simulated insolation: {current_insolation:.2f} kWh/m²/day")\n        else:\n            current_insolation = default_insolation\n            st.info(f"Using default India insolation: {current_insolation:.2f} kWh/m²/day")\n            \n        annual_yield_kwh = calc_cap * current_insolation * 365\n        calc_subsidy = pm_surya_ghar_subsidy(calc_cap)["subsidy_inr"] if calc_subsidy_on else 0\n        \n        if st.button("Calculate Financials", use_container_width=True, type="primary"):\n            calc_roi = calculate_roi(annual_yield_kwh, calc_cap, calc_cost, calc_tariff, calc_net_meter, calc_subsidy)\n            \n            k1, k2, k3 = st.columns(3)\n            k1.metric("Payback Period", f"{calc_roi['simple_payback_yr']:.1f} Yrs")\n            k2.metric("25yr NPV", f"₹{calc_roi['npv_25yr_inr']/1e5:.2f} L")\n            k3.metric("IRR", f"{calc_roi['irr_pct']:.1f}%")\n            \n            st.success(f"Estimated Annual Savings: ₹{calc_roi['annual_savings_inr_yr1']:,.0f}")\n            st.write(f"Net Investment after Subsidy: ₹{calc_roi['net_capex_inr']:,.0f}")\n\nelif nav == "Products":\n    st.title("🛒 Products")\n    \n    col1, col2 = st.columns([1, 2])\n    \n    with col1:\n        st.markdown("## Coming Soon!")\n        st.markdown("""\n        **ENERLYTICS Premium Products:**\n        \n        - 🔋 **Smart Energy Monitors**\n        - ☀️ **Pre-engineered Solar Kits**\n        - 📱 **Mobile App Integration**\n        - 💼 **Enterprise Energy Audit**\n        \n        *Sign up for early access!*\n        """)\n        \n        st.info("👈 Enter your email to get notified")\n        email = st.text_input("Email")\n        if st.button("Notify Me", use_container_width=True):\n            st.success("Thanks! You'll be first to know.")\n            \n    with col2:\n        st.image("https://via.placeholder.com/600x400/f59e0b/ffffff?text=ENERLYTICS+Products+Coming+Soon", use_column_width=True)\n        st.caption("Visualisation of upcoming hardware + software integrations")
+    col1, col2 = st.columns(2)
+    with col1:
+        calc_cap = st.slider("System Capacity (kW)", 1, 100, 5)
+        calc_state = st.selectbox("Select State", list(DISCOM_TARIFFS.keys()))
+        state_info = get_state_tariff(calc_state)
+        calc_cost = st.number_input("Cost per kW (₹/kW)", value=55000)
+        calc_tariff = st.number_input("Tariff (₹/kWh)", value=state_info["tariff"], step=0.1)
+        calc_net_meter = st.number_input("Net Metering (₹/kWh)", value=state_info["net_meter"], step=0.1)
+        calc_subsidy_on = st.checkbox("Apply PM Surya Ghar Subsidy", value=True)
+        
+    with col2:
+        # Default insolation 5.0 kWh/m2/day = 1825 kWh/kWp/year
+        default_insolation = 5.0
+        # If we have run a simulation, use that insolation
+        if st.session_state.generated:
+            current_insolation = data['ghi'].mean() * 24 / 1000.0
+            st.info(f"Using actual simulated insolation: {current_insolation:.2f} kWh/m²/day")
+        else:
+            current_insolation = default_insolation
+            st.info(f"Using default India insolation: {current_insolation:.2f} kWh/m²/day")
+            
+        annual_yield_kwh = calc_cap * current_insolation * 365
+        calc_subsidy = pm_surya_ghar_subsidy(calc_cap)["subsidy_inr"] if calc_subsidy_on else 0
+        
+        if st.button("Calculate Financials", use_container_width=True, type="primary"):
+            calc_roi = calculate_roi(annual_yield_kwh, calc_cap, calc_cost, calc_tariff, calc_net_meter, calc_subsidy)
+            
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Payback Period", f"{calc_roi['simple_payback_yr']:.1f} Yrs")
+            k2.metric("25yr NPV", f"₹{calc_roi['npv_25yr_inr']/1e5:.2f} L")
+            k3.metric("IRR", f"{calc_roi['irr_pct']:.1f}%")
+            
+            st.success(f"Estimated Annual Savings: ₹{calc_roi['annual_savings_inr']:.0f}")
 
 elif nav == "About":
     st.title("📖 About ENERLYTICS")
