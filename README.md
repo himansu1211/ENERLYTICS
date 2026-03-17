@@ -82,7 +82,7 @@ python -m pytest tests/ -v
 
 ## 👤 About the Developer
 
-**Himanshu Kumar Sahu**
+**Himansu Kumar Sahu**
 
 Passionate about bridging the gap between high-fidelity climate science and practical energy solutions for the Indian subcontinent.
 
