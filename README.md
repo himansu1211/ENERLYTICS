@@ -2,7 +2,7 @@
 
 **ENERLYTICS: ENERGY + ANALYTICS** is a professional-grade solar and wind energy advisory platform for the Indian market. It transforms 30 years of NASA climate data into high-resolution, bankable energy yield assessments, financial ROI reports, and site-specific installation advice.
 
-[**Live Demo on Streamlit Cloud**](https://energy-explore.streamlit.app/) *(Coming Soon)*
+[**Live Demo on Streamlit Cloud**](https://enerlyticsenergy.streamlit.app/)
 
 ## 🚀 Key Features
 
