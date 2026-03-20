@@ -5,12 +5,27 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pgeocode
 import json
+import sys
+import os
 from datetime import datetime
 
-# --- 1. Page Config (MUST BE FIRST) ---
+# --- 1. Path Setup (Fix for ModuleNotFoundError) ---
+file_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(file_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
+# --- 2. Imports from Local Modules ---
+from energy_explore.pipeline import fetch_nasa_power_climatology
+from energy_explore.core import generate_cell, compute_monthly_means, simulate_pv_power, simulate_wind_power, monthly_indices
+from energy_explore.financial import pm_surya_ghar_subsidy, calculate_roi, get_state_tariff, DISCOM_TARIFFS, co2_and_environment
+from energy_explore.sizer import size_solar_system, energy_audit, DEFAULT_APPLIANCES, ADDON_APPLIANCES, REGION_SUN_HOURS, compare_energy_sources, VENDOR_PANELS
+from energy_explore.report import generate_pdf_report
+
+# --- 3. Page Config (MUST BE FIRST Streamlit command) ---
 st.set_page_config(page_title="ENERLYTICS", page_icon="☀️", layout="wide")
 
-# --- 6. Session State Initialization (Early for Theme) ---
+# --- 4. Session State Initialization ---
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'loc' not in st.session_state:
@@ -24,7 +39,7 @@ if 'custom_units' not in st.session_state:
 if 'theme' not in st.session_state:
     st.session_state.theme = "Bright"
 
-# --- 3. Responsive & Themed CSS ---
+# --- 5. Responsive & Themed CSS ---
 theme_colors = {
     "Bright": {
         "bg": "#ffffff",
@@ -147,22 +162,7 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. Path Setup (Fix for ModuleNotFoundError) ---
-import sys
-import os
-file_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(file_dir)
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
-
-# --- 4. Imports from Local Modules ---
-from energy_explore.pipeline import fetch_nasa_power_climatology
-from energy_explore.core import generate_cell, compute_monthly_means, simulate_pv_power, simulate_wind_power, monthly_indices
-from energy_explore.financial import pm_surya_ghar_subsidy, calculate_roi, get_state_tariff, DISCOM_TARIFFS, co2_and_environment
-from energy_explore.sizer import size_solar_system, energy_audit, DEFAULT_APPLIANCES, ADDON_APPLIANCES, REGION_SUN_HOURS, compare_energy_sources, VENDOR_PANELS
-from energy_explore.report import generate_pdf_report
-
-# --- 4. Caching for Rapid Response ---
+# --- 6. Caching for Rapid Response ---
 @st.cache_data(ttl=3600)
 def get_weather(lat, lon, elev):
     clim = fetch_nasa_power_climatology(lat, lon)
@@ -173,19 +173,7 @@ def get_weather(lat, lon, elev):
 def get_detailed_roi(yield_kwh, kw, cost, tariff, net, subsidy, sc):
     return calculate_roi(yield_kwh, kw, cost, tariff, net, subsidy, sc)
 
-# --- 5. Session State Initialization ---
-if 'results' not in st.session_state:
-    st.session_state.results = None
-if 'loc' not in st.session_state:
-    st.session_state.loc = {"lat": 28.61, "lon": 77.23, "name": "New Delhi", "state": "Delhi"}
-if 'pincode' not in st.session_state:
-    st.session_state.pincode = "110001"
-if 'appliances' not in st.session_state:
-    st.session_state.appliances = [dict(a) for a in DEFAULT_APPLIANCES]
-if 'custom_units' not in st.session_state:
-    st.session_state.custom_units = 300
-
-# --- 6. Sidebar ---
+# --- 7. Sidebar ---
 with st.sidebar:
     st.markdown("<h1 style='color:#F59E0B; text-align:center;'>ENERLYTICS</h1>", unsafe_allow_html=True)
     
@@ -223,7 +211,7 @@ with st.sidebar:
         c_in = st.number_input("Cost per kW (₹)", value=55000, step=1000)
         sc_in = st.slider("Self Consumption (%)", 50, 100, 80)
 
-# --- 7. Data Pre-computation ---
+# --- 8. Data Pre-computation ---
 if st.session_state.results is None or solar_kw != st.session_state.get('last_solar') or wind_kw != st.session_state.get('last_wind'):
     data, clim = get_weather(st.session_state.loc["lat"], st.session_state.loc["lon"], 200.0)
     pv_power = simulate_pv_power(data['ghi'], data['temp'], solar_kw)
@@ -247,7 +235,7 @@ if st.session_state.results is None or solar_kw != st.session_state.get('last_so
 
 res = st.session_state.results
 
-# --- 8. Main App ---
+# --- 9. Main App ---
 if nav == "Explorer":
     st.markdown(f"<div class='main-header'>📍 {st.session_state.loc['name']} Energy Potential</div>", unsafe_allow_html=True)
     
