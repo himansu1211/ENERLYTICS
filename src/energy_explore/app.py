@@ -107,16 +107,23 @@ st.markdown(f"""
         color: #F59E0B;
     }}
     
-    #MainMenu, footer, header {{visibility: hidden;}}
+    #MainMenu, footer {{visibility: hidden;}}
+    [data-testid="stHeader"] {{
+        background: transparent;
+    }}
     [data-testid="stStatusWidget"] {{display: none;}}
     
     .stTabs [data-baseweb="tab-panel"] {{ padding-top: 1.5rem; }}
     
+    /* Ensure Sidebar Buttons are always visible and styled */
     [data-testid="stSidebarCollapseButton"] {{
         visibility: visible !important;
         background-color: #F59E0B !important;
         color: white !important;
         border-radius: 50% !important;
+        position: fixed !important;
+        top: 10px !important;
+        z-index: 1000001 !important;
     }}
 
     /* Typography & Layout */

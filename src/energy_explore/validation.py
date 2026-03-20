@@ -1,7 +1,3 @@
-"""
-Validation metrics for ENERLYTICS.
-Self-contained module with error safety for statistical calculations.
-"""
 import numpy as np
 from typing import Dict, List
 

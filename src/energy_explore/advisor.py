@@ -1,7 +1,3 @@
-"""
-Installation advisory module for ENERLYTICS.
-Includes solar tilt optimization, row spacing, and wind resource assessment.
-"""
 import numpy as np
 from typing import Dict, Any
 from scipy.stats import weibull_min
