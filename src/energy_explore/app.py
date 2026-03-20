@@ -10,45 +10,140 @@ from datetime import datetime
 # --- 1. Page Config (MUST BE FIRST) ---
 st.set_page_config(page_title="ENERLYTICS", page_icon="☀️", layout="wide")
 
-# --- 2. Minimalist CSS (No Animations, High Speed) ---
-st.markdown("""
-    <style>
-    * { transition: none !important; animation: none !important; }
-    [data-testid="stMetric"] {
-        background: #f8fafc;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+# --- 6. Session State Initialization (Early for Theme) ---
+if 'results' not in st.session_state:
+    st.session_state.results = None
+if 'loc' not in st.session_state:
+    st.session_state.loc = {"lat": 28.61, "lon": 77.23, "name": "New Delhi", "state": "Delhi"}
+if 'pincode' not in st.session_state:
+    st.session_state.pincode = "110001"
+if 'appliances' not in st.session_state:
+    st.session_state.appliances = [dict(a) for a in DEFAULT_APPLIANCES]
+if 'custom_units' not in st.session_state:
+    st.session_state.custom_units = 300
+if 'theme' not in st.session_state:
+    st.session_state.theme = "Bright"
+
+# --- 3. Responsive & Themed CSS ---
+theme_colors = {
+    "Bright": {
+        "bg": "#ffffff",
+        "text": "#1e293b",
+        "sub_text": "#334155",
+        "metric_bg": "#f8fafc",
+        "metric_border": "#e2e8f0",
+        "card_bg": "#f1f5f9",
+        "sidebar_bg": "#f8fafc",
+        "plotly_theme": "simple_white"
+    },
+    "Dark": {
+        "bg": "#0f172a",
+        "text": "#f1f5f9",
+        "sub_text": "#cbd5e1",
+        "metric_bg": "#1e293b",
+        "metric_border": "#334155",
+        "card_bg": "#1e293b",
+        "sidebar_bg": "#1e293b",
+        "plotly_theme": "plotly_dark"
     }
-    #MainMenu, footer, header {visibility: hidden;}
-    [data-testid="stStatusWidget"] {display: none;}
-    .stTabs [data-baseweb="tab-panel"] { padding-top: 1.5rem; }
-    [data-testid="stSidebarCollapseButton"] {
+}
+tc = theme_colors[st.session_state.theme]
+
+st.markdown(f"""
+    <style>
+    /* Global Overrides */
+    * {{ transition: none !important; animation: none !important; }}
+    
+    .stApp {{
+        background-color: {tc['bg']};
+        color: {tc['text']};
+    }}
+    
+    /* Responsive Metric Cards */
+    [data-testid="stMetric"] {{
+        background: {tc['metric_bg']};
+        padding: 15px;
+        border-radius: 12px;
+        border: 1px solid {tc['metric_border']};
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        transition: transform 0.2s ease-in-out;
+    }}
+    
+    [data-testid="stMetric"]:hover {{
+        transform: translateY(-2px);
+    }}
+
+    /* Sidebar Styling */
+    [data-testid="stSidebar"] {{
+        background-color: {tc['sidebar_bg']};
+    }}
+    
+    /* Input Labels */
+    label {{
+        color: {tc['text']} !important;
+    }}
+    
+    /* Tabs Styling */
+    .stTabs [data-baseweb="tab"] {{
+        color: {tc['text']};
+    }}
+    
+    .stTabs [data-baseweb="tab"]:hover {{
+        color: #F59E0B;
+    }}
+    
+    #MainMenu, footer, header {{visibility: hidden;}}
+    [data-testid="stStatusWidget"] {{display: none;}}
+    
+    .stTabs [data-baseweb="tab-panel"] {{ padding-top: 1.5rem; }}
+    
+    [data-testid="stSidebarCollapseButton"] {{
         visibility: visible !important;
         background-color: #F59E0B !important;
         color: white !important;
         border-radius: 50% !important;
-    }
-    .main-header {
-        font-size: 2.5rem;
+    }}
+
+    /* Typography & Layout */
+    .main-header {{
+        font-size: clamp(1.8rem, 5vw, 2.5rem);
+        font-weight: 800;
+        color: {tc['text']};
+        margin-bottom: 1.5rem;
+        letter-spacing: -0.025em;
+    }}
+    
+    .sub-header {{
+        font-size: clamp(1.2rem, 3vw, 1.6rem);
         font-weight: 700;
-        color: #1e293b;
-        margin-bottom: 1rem;
-    }
-    .sub-header {
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: #334155;
+        color: {tc['sub_text']};
         margin-top: 2rem;
         margin-bottom: 1rem;
-    }
-    .info-card {
-        background: #f1f5f9;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #F59E0B;
-    }
+    }}
+    
+    .info-card {{
+        background: {tc['card_bg']};
+        padding: 24px;
+        border-radius: 16px;
+        border-left: 6px solid #F59E0B;
+        color: {tc['text']};
+        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+    }}
+
+    /* Mobile Optimization */
+    @media (max-width: 768px) {{
+        .main-header {{ text-align: center; }}
+        [data-testid="column"] {{
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+            margin-bottom: 1rem;
+        }}
+    }}
+    
+    /* Dark Mode specific text fixes */
+    {"[data-testid='stMarkdownContainer'] p, [data-testid='stMarkdownContainer'] span, [data-testid='stMarkdownContainer'] li { color: " + tc['text'] + " !important; }" if st.session_state.theme == "Dark" else ""}
+    {"[data-testid='stExpander'] label { color: " + tc['text'] + " !important; }" if st.session_state.theme == "Dark" else ""}
     </style>
 """, unsafe_allow_html=True)
 
@@ -93,6 +188,13 @@ if 'custom_units' not in st.session_state:
 # --- 6. Sidebar ---
 with st.sidebar:
     st.markdown("<h1 style='color:#F59E0B; text-align:center;'>ENERLYTICS</h1>", unsafe_allow_html=True)
+    
+    # Theme Toggle
+    theme_btn = st.radio("🌗 Theme", ["Bright", "Dark"], index=0 if st.session_state.theme == "Bright" else 1, horizontal=True)
+    if theme_btn != st.session_state.theme:
+        st.session_state.theme = theme_btn
+        st.rerun()
+
     nav = st.radio("Navigation", ["Explorer", "Comparison", "System Sizer", "ROI Analysis", "About"], key="nav")
     
     st.divider()
@@ -167,7 +269,10 @@ if nav == "Explorer":
     
     with t_sum:
         st.markdown("<div class='sub-header'>Solar Irradiance Heatmap</div>", unsafe_allow_html=True)
-        fig_h = px.imshow(res['data']['ghi'].reshape(365, 24).T, color_continuous_scale="YlOrRd", labels=dict(x="Day of Year", y="Hour of Day", color="W/m²"))
+        fig_h = px.imshow(res['data']['ghi'].reshape(365, 24).T, 
+                          color_continuous_scale="YlOrRd", 
+                          labels=dict(x="Day of Year", y="Hour of Day", color="W/m²"),
+                          template=tc['plotly_theme'])
         fig_h.update_layout(height=450, margin=dict(l=0,r=0,t=20,b=0))
         st.plotly_chart(fig_h, use_container_width=True, config={'displayModeBar': False})
         
@@ -181,9 +286,15 @@ if nav == "Explorer":
         
         c1, c2 = st.columns(2)
         with c1:
-            st.plotly_chart(px.bar(x=months, y=ghi_m, title="Monthly Avg Irradiance (W/m²)", color_discrete_sequence=['#F59E0B'], labels={'x':'Month', 'y':'W/m²'}), use_container_width=True)
+            st.plotly_chart(px.bar(x=months, y=ghi_m, title="Monthly Avg Irradiance (W/m²)", 
+                                   color_discrete_sequence=['#F59E0B'], 
+                                   labels={'x':'Month', 'y':'W/m²'},
+                                   template=tc['plotly_theme']), use_container_width=True)
         with c2:
-            st.plotly_chart(px.bar(x=months, y=pv_m, title="Monthly Solar Yield (MWh)", color_discrete_sequence=['#3B82F6'], labels={'x':'Month', 'y':'MWh'}), use_container_width=True)
+            st.plotly_chart(px.bar(x=months, y=pv_m, title="Monthly Solar Yield (MWh)", 
+                                   color_discrete_sequence=['#3B82F6'], 
+                                   labels={'x':'Month', 'y':'MWh'},
+                                   template=tc['plotly_theme']), use_container_width=True)
             
         st.markdown("<div class='sub-header'>Monthly Yield Table</div>", unsafe_allow_html=True)
         mon_df = pd.DataFrame({"Month": months, "Irradiance (W/m²)": ghi_m, "Solar Yield (kWh)": [p*1000 for p in pv_m]})
@@ -208,15 +319,19 @@ if nav == "Explorer":
         with c1:
             fig_g = go.Figure()
             fig_g.add_trace(go.Scatter(x=list(range(24)), y=g24, name="Irradiance", fill='tozeroy', line=dict(color='#F59E0B')))
-            fig_g.update_layout(title="Typical 24h Solar Cycle", xaxis_title="Hour", yaxis_title="W/m²", template="simple_white")
+            fig_g.update_layout(title="Typical 24h Solar Cycle", xaxis_title="Hour", yaxis_title="W/m²", template=tc['plotly_theme'])
             st.plotly_chart(fig_g, use_container_width=True)
         with c2:
             fig_t = go.Figure()
             fig_t.add_trace(go.Scatter(x=list(range(24)), y=t24, name="Temperature", line=dict(color='#EF4444')))
-            fig_t.update_layout(title="Typical 24h Temp Cycle", xaxis_title="Hour", yaxis_title="°C", template="simple_white")
+            fig_t.update_layout(title="Typical 24h Temp Cycle", xaxis_title="Hour", yaxis_title="°C", template=tc['plotly_theme'])
             st.plotly_chart(fig_t, use_container_width=True)
             
-        st.plotly_chart(px.line(x=list(range(24)), y=p24, title="Typical 24h Power Generation (Watts)", labels={'x':'Hour','y':'Watts'}, color_discrete_sequence=['#10B981']), use_container_width=True)
+        st.plotly_chart(px.line(x=list(range(24)), y=p24, 
+                                title="Typical 24h Power Generation (Watts)", 
+                                labels={'x':'Hour','y':'Watts'}, 
+                                color_discrete_sequence=['#10B981'],
+                                template=tc['plotly_theme']), use_container_width=True)
 
     with t_adv:
         from energy_explore.advisor import generate_installation_advisory
@@ -238,7 +353,11 @@ if nav == "Explorer":
         
         st.write("**Power Density by Height:**")
         h_df = pd.DataFrame(adv['wind']['height_data'])
-        st.line_chart(h_df.set_index('height_m')['power_density_wm2'])
+        fig_wind = px.line(h_df, x='height_m', y='power_density_wm2', 
+                           template=tc['plotly_theme'], 
+                           markers=True,
+                           title="Wind Power Density Profile")
+        st.plotly_chart(fig_wind, use_container_width=True)
 
     with t_env:
 
@@ -298,7 +417,9 @@ elif nav == "Comparison":
             loc1["name"]: pv1_m,
             loc2["name"]: pv2_m
         })
-        st.plotly_chart(px.line(comp_df, x="Month", y=[loc1["name"], loc2["name"]], markers=True, title="Monthly Yield Comparison"), use_container_width=True)
+        st.plotly_chart(px.line(comp_df, x="Month", y=[loc1["name"], loc2["name"]], 
+                                markers=True, title="Monthly Yield Comparison",
+                                template=tc['plotly_theme']), use_container_width=True)
 
 elif nav == "System Sizer":
     st.markdown("<div class='main-header'>📏 Solar System Sizer</div>", unsafe_allow_html=True)
@@ -409,12 +530,13 @@ elif nav == "System Sizer":
         with c1:
             st.markdown(f"**Energy Efficiency Rating: <span style='color:{audit['energy_rating_color']}'>{audit['energy_rating']}</span>**", unsafe_allow_html=True)
             fig_audit = px.pie(
-                names=list(audit["category_labels"].values()), 
-                values=list(audit["breakdown_kwh"].values()), 
-                hole=0.4,
-                title="Monthly Usage Breakdown",
-                color_discrete_sequence=px.colors.qualitative.Pastel
-            )
+            names=list(audit["category_labels"].values()), 
+            values=list(audit["breakdown_kwh"].values()), 
+            hole=0.4,
+            title="Monthly Usage Breakdown",
+            color_discrete_sequence=px.colors.qualitative.Pastel,
+            template=tc['plotly_theme']
+        )
             st.plotly_chart(fig_audit, use_container_width=True)
             
         with c2:
@@ -461,7 +583,7 @@ elif nav == "ROI Analysis":
         fig_cf = go.Figure()
         fig_cf.add_trace(go.Bar(x=yby["year"], y=yby["savings_inr"], name="Annual Savings", marker_color="#3B82F6"))
         fig_cf.add_trace(go.Scatter(x=yby["year"], y=yby["cumulative_savings"], name="Cumulative Savings", line=dict(color="#F59E0B", width=3)))
-        fig_cf.update_layout(template="simple_white", height=450, xaxis_title="Year", yaxis_title="Rupees (₹)")
+        fig_cf.update_layout(template=tc['plotly_theme'], height=450, xaxis_title="Year", yaxis_title="Rupees (₹)")
         st.plotly_chart(fig_cf, use_container_width=True)
     
     with c2:
