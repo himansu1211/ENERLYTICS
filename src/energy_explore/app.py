@@ -93,6 +93,12 @@ st.markdown(f"""
         background-color: {tc['sidebar_bg']};
     }}
     
+    [data-testid="stSidebar"] label, 
+    [data-testid="stSidebar"] p, 
+    [data-testid="stSidebar"] span {{
+        color: {tc['text']} !important;
+    }}
+    
     /* Input Labels */
     label {{
         color: {tc['text']} !important;
@@ -163,9 +169,20 @@ st.markdown(f"""
         }}
     }}
     
-    /* Dark Mode specific text fixes */
-    {"[data-testid='stMarkdownContainer'] p, [data-testid='stMarkdownContainer'] span, [data-testid='stMarkdownContainer'] li { color: " + tc['text'] + " !important; }" if st.session_state.theme == "Dark" else ""}
-    {"[data-testid='stExpander'] label { color: " + tc['text'] + " !important; }" if st.session_state.theme == "Dark" else ""}
+    /* Global Text Color Fixes (Enforces tc['text'] across both themes) */
+    [data-testid='stMarkdownContainer'] p, 
+    [data-testid='stMarkdownContainer'] span, 
+    [data-testid='stMarkdownContainer'] li, 
+    [data-testid='stExpander'] label,
+    [data-testid='stMetric'] label,
+    [data-testid='stMetric'] div {{ 
+        color: {tc['text']} !important; 
+    }}
+    
+    /* Ensure tabs text color is always enforced */
+    .stTabs [data-baseweb="tab"] p {{
+        color: {tc['text']} !important;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -601,23 +618,6 @@ elif nav == "ROI Analysis":
         "savings_inr": "₹{:,.0f}",
         "cumulative_savings": "₹{:,.0f}"
     }), use_container_width=True)
-
-    st.divider()
-    
-    # Simple bill calculation based on units and tariff
-    pre_solar_bill = units * t_in
-    # Post solar bill: units - solar_generation (self consumed + exported at net meter rate)
-    solar_gen_monthly = res['pv_power'].sum() / 12.0 # kWh/year to kWh/month
-    post_solar_units = max(0, units - solar_gen_monthly * (sc_in/100.0))
-    exported_units = solar_gen_monthly * (1 - sc_in/100.0)
-    post_solar_bill = (post_solar_units * t_in) - (exported_units * n_in)
-    
-    b1, b2, b3 = st.columns(3)
-    b1.metric("Pre-Solar Bill", f"₹{pre_solar_bill:,.0f}/mo")
-    b2.metric("Post-Solar Bill", f"₹{max(0, post_solar_bill):,.0f}/mo", delta=f"{max(0, post_solar_bill) - pre_solar_bill:,.0f}", delta_color="inverse")
-    b3.metric("Monthly Savings", f"₹{pre_solar_bill - max(0, post_solar_bill):,.0f}/mo")
-    
-    st.caption(f"Note: Based on {units} units/month consumption and {solar_kw} kW solar system.")
 
     st.divider()
     if st.button("📄 Generate & Download PDF Report", use_container_width=True):
