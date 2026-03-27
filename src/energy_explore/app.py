@@ -9,23 +9,19 @@ import sys
 import os
 from datetime import datetime
 
-# --- 1. Path Setup (Fix for ModuleNotFoundError) ---
 file_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(file_dir)
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
-# --- 2. Imports from Local Modules ---
 from energy_explore.pipeline import fetch_nasa_power_climatology
 from energy_explore.core import generate_cell, compute_monthly_means, simulate_pv_power, simulate_wind_power, monthly_indices
 from energy_explore.financial import pm_surya_ghar_subsidy, calculate_roi, get_state_tariff, DISCOM_TARIFFS, co2_and_environment
 from energy_explore.sizer import size_solar_system, energy_audit, DEFAULT_APPLIANCES, ADDON_APPLIANCES, REGION_SUN_HOURS, compare_energy_sources, VENDOR_PANELS
 from energy_explore.report import generate_pdf_report
 
-# --- 3. Page Config (MUST BE FIRST Streamlit command) ---
 st.set_page_config(page_title="ENERLYTICS", page_icon="☀️", layout="wide")
 
-# --- 4. Session State Initialization ---
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'loc' not in st.session_state:
@@ -39,7 +35,7 @@ if 'custom_units' not in st.session_state:
 if 'theme' not in st.session_state:
     st.session_state.theme = "Bright"
 
-# --- 5. Responsive & Themed CSS ---
+
 theme_colors = {
     "Bright": {
         "bg": "#ffffff",
@@ -169,7 +165,7 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 6. Caching for Rapid Response ---
+# --- Caching for Rapid Response ---
 @st.cache_data(ttl=3600)
 def get_weather(lat, lon, elev):
     clim = fetch_nasa_power_climatology(lat, lon)
@@ -180,7 +176,7 @@ def get_weather(lat, lon, elev):
 def get_detailed_roi(yield_kwh, kw, cost, tariff, net, subsidy, sc):
     return calculate_roi(yield_kwh, kw, cost, tariff, net, subsidy, sc)
 
-# --- 7. Sidebar ---
+# --- Sidebar ---
 with st.sidebar:
     st.markdown("<h1 style='color:#F59E0B; text-align:center;'>ENERLYTICS</h1>", unsafe_allow_html=True)
     
@@ -218,7 +214,7 @@ with st.sidebar:
         c_in = st.number_input("Cost per kW (₹)", value=55000, step=1000)
         sc_in = st.slider("Self Consumption (%)", 50, 100, 80)
 
-# --- 8. Data Pre-computation ---
+# --- Data Pre-computation ---
 if st.session_state.results is None or solar_kw != st.session_state.get('last_solar') or wind_kw != st.session_state.get('last_wind'):
     data, clim = get_weather(st.session_state.loc["lat"], st.session_state.loc["lon"], 200.0)
     pv_power = simulate_pv_power(data['ghi'], data['temp'], solar_kw)
@@ -242,7 +238,7 @@ if st.session_state.results is None or solar_kw != st.session_state.get('last_so
 
 res = st.session_state.results
 
-# --- 9. Main App ---
+# --- Main App ---
 if nav == "Explorer":
     st.markdown(f"<div class='main-header'>📍 {st.session_state.loc['name']} Energy Potential</div>", unsafe_allow_html=True)
     
@@ -601,25 +597,6 @@ elif nav == "ROI Analysis":
         "savings_inr": "₹{:,.0f}",
         "cumulative_savings": "₹{:,.0f}"
     }), use_container_width=True)
-
-    st.divider()
-    st.subheader("🧾 Monthly Bill Estimator (Pre vs Post Solar)")
-    st.write("See how your electricity bill changes after installing solar.")
-    
-    # Simple bill calculation based on units and tariff
-    pre_solar_bill = units * t_in
-    # Post solar bill: units - solar_generation (self consumed + exported at net meter rate)
-    solar_gen_monthly = res['pv_power'].sum() / 12.0 # kWh/year to kWh/month
-    post_solar_units = max(0, units - solar_gen_monthly * (sc_in/100.0))
-    exported_units = solar_gen_monthly * (1 - sc_in/100.0)
-    post_solar_bill = (post_solar_units * t_in) - (exported_units * n_in)
-    
-    b1, b2, b3 = st.columns(3)
-    b1.metric("Pre-Solar Bill", f"₹{pre_solar_bill:,.0f}/mo")
-    b2.metric("Post-Solar Bill", f"₹{max(0, post_solar_bill):,.0f}/mo", delta=f"{max(0, post_solar_bill) - pre_solar_bill:,.0f}", delta_color="inverse")
-    b3.metric("Monthly Savings", f"₹{pre_solar_bill - max(0, post_solar_bill):,.0f}/mo")
-    
-    st.caption(f"Note: Based on {units} units/month consumption and {solar_kw} kW solar system.")
 
     st.divider()
     if st.button("📄 Generate & Download PDF Report", use_container_width=True):
